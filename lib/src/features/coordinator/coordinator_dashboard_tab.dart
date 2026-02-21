@@ -30,6 +30,7 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
 
   bool _loading = true;
   String _error = '';
+  String _searchQuery = '';
   Timer? _pollTimer;
 
   Map<String, dynamic> _ctx = {};
@@ -99,39 +100,100 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
     }
   }
 
+  Future<void> _fetchAndShowLatestSos() async {
+    try {
+      final raw = await widget.api.get('/api/v1/coordinator/sos');
+      final list = (raw is List)
+          ? raw.cast<Map<String, dynamic>>()
+          : <Map<String, dynamic>>[];
+      if (list.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No active SOS alerts found.')),
+        );
+        return;
+      }
+      final latest = list.first;
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text(
+            '🆘 Emergency Alert',
+            style: TextStyle(color: AppColors.criticalRed),
+          ),
+          content: Text(
+            'Latest SOS from: ${latest['volunteer_name'] ?? 'Unknown'}\nStatus: ${(latest['status'] ?? '').toString().toUpperCase()}',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                widget.onNavigate(3);
+              },
+              child: const Text('View All'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to check SOS: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _buildHeader(),
-          const SizedBox(height: 10),
-          if (_error.isNotEmpty)
-            Text(_error, style: const TextStyle(color: AppColors.criticalRed)),
-          _buildStatsRow(),
-          const SizedBox(height: 12),
-          _buildMiniMap(),
-          const SizedBox(height: 12),
-          _buildRecentTasks(),
-          const SizedBox(height: 12),
-          _buildRecentSos(),
-        ],
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    return Scaffold(
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _buildHeader(),
+            const SizedBox(height: 10),
+            if (_error.isNotEmpty)
+              Text(
+                _error,
+                style: const TextStyle(color: AppColors.criticalRed),
+              ),
+            _buildMiniMap(),
+            const SizedBox(height: 12),
+            _buildStatsRow(),
+            const SizedBox(height: 12),
+            _buildRecentTasks(),
+            const SizedBox(height: 12),
+            _buildRecentSos(),
+            const SizedBox(height: 80), // Padding for FAB
+          ],
+        ),
+      ),
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(right: 12.0),
+        child: AnimatedSosButton(onTrigger: _fetchAndShowLatestSos),
       ),
     );
   }
 
   Widget _buildHeader() {
-    final stats = (_ctx['stats'] is Map<String, dynamic>)
-        ? _ctx['stats'] as Map<String, dynamic>
-        : {};
-    final activeSos = (stats['active_sos'] ?? 0).toString();
-
     return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(30),
+        side: BorderSide(color: Colors.grey.withValues(alpha: 0.3), width: 1),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
         child: Row(
           children: [
             CircleAvatar(
@@ -145,20 +207,17 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Coordinator Dashboard',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text('Active SOS: $activeSos • Zone Ops Live'),
-                ],
+              child: TextField(
+                onChanged: (val) => setState(() => _searchQuery = val),
+                decoration: const InputDecoration(
+                  hintText: 'Search alerts, tasks...',
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                ),
               ),
             ),
+            const Icon(Icons.search, color: Colors.grey),
           ],
         ),
       ),
@@ -193,32 +252,43 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
       scrollDirection: Axis.horizontal,
       child: Row(
         children: items.map((item) {
-          final (label, value, icon, color, tabIndex) = item;
+          final (label, value, _, color, tabIndex) = item;
           return SizedBox(
             width: 110,
             child: InkWell(
               onTap: () => widget.onNavigate(tabIndex),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(24),
               child: Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  side: BorderSide(
+                    color: Colors.grey.withValues(alpha: 0.3),
+                    width: 1,
+                  ),
+                ),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                    vertical: 10,
+                    vertical: 16,
                     horizontal: 8,
                   ),
                   child: Column(
                     children: [
-                      Icon(icon, size: 22, color: color),
-                      const SizedBox(height: 4),
                       Text(
                         '$value',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
+                        style: TextStyle(
+                          fontSize: 34,
+                          fontWeight: FontWeight.w800,
+                          color: Theme.of(context).colorScheme.onSurface,
                         ),
                       ),
                       Text(
                         label,
-                        style: const TextStyle(fontSize: 11),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey,
+                        ),
                         maxLines: 1,
                       ),
                     ],
@@ -233,7 +303,7 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
   }
 
   Widget _buildMiniMap() {
-    LatLng center = const LatLng(28.6139, 77.2090);
+    LatLng center = const LatLng(18.5204, 73.8567);
     if (_zones.isNotEmpty) {
       final first = _zones.first;
       final lat = parseLat(first['center_lat']);
@@ -245,83 +315,101 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
 
     return Card(
       clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        height: 180,
-        child: Stack(
-          children: [
-            FlutterMap(
-              mapController: _miniMapController,
-              options: MapOptions(initialCenter: center, initialZoom: 11),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.example.sahyog_app',
-                ),
-                CircleLayer(
-                  circles: _zones.map((zone) {
-                    final lat = parseLat(zone['center_lat']);
-                    final lng = parseLng(zone['center_lng']);
-                    if (lat == null || lng == null) {
-                      return const CircleMarker(point: LatLng(0, 0), radius: 0);
-                    }
-                    final severity = (zone['severity'] ?? 'red').toString();
-                    final radius = parseLat(zone['radius_meters']) ?? 400;
-                    final color = _severityColor(severity);
-                    return CircleMarker(
-                      point: LatLng(lat, lng),
-                      radius: radius,
-                      useRadiusInMeter: true,
-                      color: color.withValues(alpha: 0.16),
-                      borderColor: color,
-                      borderStrokeWidth: 2,
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-            Positioned(
-              right: 10,
-              bottom: 10,
-              child: Column(
+      child: GestureDetector(
+        onLongPress: () => widget.onNavigate(1),
+        child: SizedBox(
+          height: 180,
+          child: Stack(
+            children: [
+              FlutterMap(
+                mapController: _miniMapController,
+                options: MapOptions(initialCenter: center, initialZoom: 11),
                 children: [
-                  FloatingActionButton.small(
-                    heroTag: 'mini_map_zoom_in',
-                    onPressed: () {
-                      _miniMapController.move(
-                        _miniMapController.camera.center,
-                        _miniMapController.camera.zoom + 1,
-                      );
-                    },
-                    backgroundColor: Colors.white,
-                    foregroundColor: AppColors.primaryGreen,
-                    child: const Icon(Icons.add),
+                  TileLayer(
+                    urlTemplate:
+                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.example.sahyog_app',
                   ),
-                  const SizedBox(height: 8),
-                  FloatingActionButton.small(
-                    heroTag: 'mini_map_zoom_out',
-                    onPressed: () {
-                      _miniMapController.move(
-                        _miniMapController.camera.center,
-                        _miniMapController.camera.zoom - 1,
+                  CircleLayer(
+                    circles: _zones.map((zone) {
+                      final lat = parseLat(zone['center_lat']);
+                      final lng = parseLng(zone['center_lng']);
+                      if (lat == null || lng == null) {
+                        return const CircleMarker(
+                          point: LatLng(0, 0),
+                          radius: 0,
+                        );
+                      }
+                      final severity = (zone['severity'] ?? 'red').toString();
+                      final radius = parseLat(zone['radius_meters']) ?? 400;
+                      final color = _severityColor(severity);
+                      return CircleMarker(
+                        point: LatLng(lat, lng),
+                        radius: radius,
+                        useRadiusInMeter: true,
+                        color: color.withValues(alpha: 0.16),
+                        borderColor: color,
+                        borderStrokeWidth: 2,
                       );
-                    },
-                    backgroundColor: Colors.white,
-                    foregroundColor: AppColors.primaryGreen,
-                    child: const Icon(Icons.remove),
+                    }).toList(),
                   ),
                 ],
               ),
-            ),
-          ],
+              Positioned(
+                right: 10,
+                bottom: 10,
+                child: Column(
+                  children: [
+                    FloatingActionButton.small(
+                      heroTag: 'mini_map_zoom_in',
+                      onPressed: () {
+                        _miniMapController.move(
+                          _miniMapController.camera.center,
+                          _miniMapController.camera.zoom + 1,
+                        );
+                      },
+                      backgroundColor: Colors.white,
+                      foregroundColor: AppColors.primaryGreen,
+                      child: const Icon(Icons.add),
+                    ),
+                    const SizedBox(height: 8),
+                    FloatingActionButton.small(
+                      heroTag: 'mini_map_zoom_out',
+                      onPressed: () {
+                        _miniMapController.move(
+                          _miniMapController.camera.center,
+                          _miniMapController.camera.zoom - 1,
+                        );
+                      },
+                      backgroundColor: Colors.white,
+                      foregroundColor: AppColors.primaryGreen,
+                      child: const Icon(Icons.remove),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildRecentTasks() {
+    final filtered = _searchQuery.isEmpty
+        ? _recentTasks
+        : _recentTasks.where((task) {
+            final title = (task['title'] ?? task['type'] ?? '')
+                .toString()
+                .toLowerCase();
+            final status = (task['status'] ?? '').toString().toLowerCase();
+            return title.contains(_searchQuery.toLowerCase()) ||
+                status.contains(_searchQuery.toLowerCase());
+          }).toList();
+
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -329,32 +417,44 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
               'Recent Tasks',
               style: Theme.of(
                 context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
             ),
-            const SizedBox(height: 6),
-            if (_recentTasks.isEmpty)
-              const Text('No active tasks.')
+            const SizedBox(height: 12),
+            if (filtered.isEmpty)
+              const Text('No tasks.', style: TextStyle(color: Colors.grey))
             else
-              ..._recentTasks.map((task) {
+              ...filtered.map((task) {
                 final title = (task['title'] ?? task['type'] ?? 'Task')
                     .toString();
                 final status = (task['status'] ?? 'pending').toString();
-                return ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: const CircleAvatar(
-                    radius: 14,
-                    backgroundColor: AppColors.primaryGreen,
-                    foregroundColor: Colors.white,
-                    child: Icon(Icons.task, size: 14),
-                  ),
-                  title: Text(title, style: const TextStyle(fontSize: 13)),
-                  trailing: Text(
-                    status.toUpperCase(),
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.blueAccent,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                      Text(
+                        status.toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
                 );
               }),
@@ -365,9 +465,18 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
   }
 
   Widget _buildRecentSos() {
+    final filtered = _searchQuery.isEmpty
+        ? _recentSos
+        : _recentSos.where((sos) {
+            final vol = (sos['volunteer_name'] ?? '').toString().toLowerCase();
+            final status = (sos['status'] ?? '').toString().toLowerCase();
+            return vol.contains(_searchQuery.toLowerCase()) ||
+                status.contains(_searchQuery.toLowerCase());
+          }).toList();
+
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -375,34 +484,43 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
               'Recent SOS Alerts',
               style: Theme.of(
                 context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
             ),
-            const SizedBox(height: 6),
-            if (_recentSos.isEmpty)
-              const Text(
-                'No active SOS alerts.',
-                style: TextStyle(fontSize: 13),
-              )
+            const SizedBox(height: 12),
+            if (filtered.isEmpty)
+              const Text('No SOS alerts.', style: TextStyle(color: Colors.grey))
             else
-              ..._recentSos.map((sos) {
+              ...filtered.map((sos) {
                 final status = (sos['status'] ?? 'triggered').toString();
                 final vol = (sos['volunteer_name'] ?? 'Unknown').toString();
-                return ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: const CircleAvatar(
-                    radius: 14,
-                    backgroundColor: AppColors.criticalRed,
-                    foregroundColor: Colors.white,
-                    child: Icon(Icons.sos, size: 14),
-                  ),
-                  title: Text(vol, style: const TextStyle(fontSize: 13)),
-                  trailing: Text(
-                    status.toUpperCase(),
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: AppColors.criticalRed,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          vol,
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                      Text(
+                        status.toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
                 );
               }),
@@ -421,5 +539,85 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
       default:
         return AppColors.criticalRed;
     }
+  }
+}
+
+class AnimatedSosButton extends StatefulWidget {
+  final VoidCallback onTrigger;
+  const AnimatedSosButton({super.key, required this.onTrigger});
+
+  @override
+  State<AnimatedSosButton> createState() => _AnimatedSosButtonState();
+}
+
+class _AnimatedSosButtonState extends State<AnimatedSosButton>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  bool _isPressed = false;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _onPanDown(_) {
+    setState(() => _isPressed = true);
+    _timer = Timer(const Duration(seconds: 3), () {
+      widget.onTrigger();
+      setState(() => _isPressed = false);
+    });
+  }
+
+  void _onPanCancel() {
+    setState(() => _isPressed = false);
+    _timer?.cancel();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onPanDown: _onPanDown,
+      onPanCancel: _onPanCancel,
+      onPanEnd: (_) => _onPanCancel(),
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          final scale = _isPressed ? 1.1 : 1.0 + (_controller.value * 0.1);
+          return Transform.scale(
+            scale: scale,
+            child: Container(
+              width: 65,
+              height: 65,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.criticalRed,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.criticalRed.withValues(
+                      alpha: 0.5 * _controller.value,
+                    ),
+                    blurRadius: 15 * _controller.value,
+                    spreadRadius: 10 * _controller.value,
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.sos, color: Colors.white, size: 32),
+            ),
+          );
+        },
+      ),
+    );
   }
 }

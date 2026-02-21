@@ -31,8 +31,11 @@ class _CoordinatorOperationsTabState extends State<CoordinatorOperationsTab> {
   List<Map<String, dynamic>> _selectedVolunteers = [];
   bool _creating = false;
 
-  // Needs filter
+  // Filters
   String _needsFilter = 'all';
+  String _volunteersFilter = 'all'; // all, assigned, unassigned
+
+  // View state
 
   // Expanded volunteer cards
   final Set<String> _expandedVolunteers = {};
@@ -92,6 +95,9 @@ class _CoordinatorOperationsTabState extends State<CoordinatorOperationsTab> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      ),
       builder: (ctx) {
         final selectedIds = _selectedVolunteers
             .map((v) => v['id'].toString())
@@ -310,246 +316,319 @@ class _CoordinatorOperationsTabState extends State<CoordinatorOperationsTab> {
 
   // ── Volunteers ─────────────────────────────────────────────────────
   Widget _buildVolunteersTab() {
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: _volunteers.isEmpty
-          ? ListView(
-              children: const [
-                Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Center(child: Text('No volunteers found.')),
-                ),
-              ],
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: _volunteers.length,
-              itemBuilder: (context, index) {
-                final v = _volunteers[index];
-                final id = v['id'].toString();
-                final name = (v['full_name'] ?? 'Unnamed').toString();
-                final email = (v['email'] ?? '').toString();
-                final verified = v['is_verified'] == true;
-                final available = v['is_available'] == true;
-                final expanded = _expandedVolunteers.contains(id);
-                final assignedTasks = _tasks
-                    .where((t) => t['volunteer_id']?.toString() == id)
-                    .toList();
+    final filtered = _volunteersFilter == 'all'
+        ? _volunteers
+        : _volunteers.where((v) {
+            final id = v['id'].toString();
+            final assignedTasks = _tasks
+                .where((t) => t['volunteer_id']?.toString() == id)
+                .toList();
+            if (_volunteersFilter == 'assigned') {
+              return assignedTasks.isNotEmpty;
+            }
+            if (_volunteersFilter == 'unassigned') {
+              return assignedTasks.isEmpty;
+            }
+            return true;
+          }).toList();
 
-                return Card(
-                  child: InkWell(
-                    onTap: () => setState(() {
-                      expanded
-                          ? _expandedVolunteers.remove(id)
-                          : _expandedVolunteers.add(id);
-                    }),
-                    borderRadius: BorderRadius.circular(12),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              CircleAvatar(
-                                backgroundColor: AppColors.primaryGreen,
-                                foregroundColor: Colors.white,
-                                child: Text(
-                                  name.isNotEmpty ? name[0].toUpperCase() : '?',
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      name,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    Text(
-                                      email,
-                                      style: const TextStyle(fontSize: 12),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              if (verified)
-                                const Icon(
-                                  Icons.verified,
-                                  color: AppColors.primaryGreen,
-                                  size: 18,
-                                ),
-                              const SizedBox(width: 4),
-                              Chip(
-                                label: Text(
-                                  available ? 'ONLINE' : 'OFFLINE',
-                                  style: const TextStyle(fontSize: 9),
-                                ),
-                                padding: EdgeInsets.zero,
-                                visualDensity: VisualDensity.compact,
-                                backgroundColor: available
-                                    ? Colors.green.shade50
-                                    : Colors.grey.shade200,
-                              ),
-                              Icon(
-                                expanded
-                                    ? Icons.expand_less
-                                    : Icons.expand_more,
-                                size: 20,
-                              ),
-                            ],
-                          ),
-                          if (expanded) ...[
-                            const Divider(height: 16),
-                            Text(
-                              'Assigned Tasks (${assignedTasks.length})',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            if (assignedTasks.isEmpty)
-                              const Text(
-                                'No tasks assigned.',
-                                style: TextStyle(fontSize: 12),
-                              )
-                            else
-                              ...assignedTasks.map(
-                                (t) => Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.circle,
-                                        size: 6,
-                                        color: AppColors.primaryGreen,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Expanded(
-                                        child: Text(
-                                          '${t['title'] ?? t['type']} — ${(t['status'] ?? 'pending').toString().toUpperCase()}',
-                                          style: const TextStyle(fontSize: 12),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-    );
-  }
-
-  // ── Tasks ──────────────────────────────────────────────────────────
-  Widget _buildTasksTab() {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         padding: const EdgeInsets.all(12),
         children: [
-          // Create Task form
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Create Task',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _titleCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Title',
-                      prefixIcon: Icon(Icons.task_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _typeCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Type',
-                      prefixIcon: Icon(Icons.category_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _descCtrl,
-                    maxLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: 'Description',
-                      prefixIcon: Icon(Icons.notes_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  // Volunteer selection button + chips
-                  OutlinedButton.icon(
-                    onPressed: _openVolunteerPanel,
-                    icon: const Icon(Icons.person_add_outlined),
-                    label: Text(
-                      _selectedVolunteers.isEmpty
-                          ? 'Select Volunteers'
-                          : '${_selectedVolunteers.length} selected',
-                    ),
-                  ),
-                  if (_selectedVolunteers.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: _selectedVolunteers.map((v) {
-                          return Chip(
-                            label: Text(
-                              (v['full_name'] ?? 'Unnamed').toString(),
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            onDeleted: () {
-                              setState(() {
-                                _selectedVolunteers.removeWhere(
-                                  (sv) => sv['id'] == v['id'],
-                                );
-                              });
-                            },
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: _creating ? null : _createTask,
-                    icon: const Icon(Icons.add_task),
-                    label: const Text('Create Task'),
-                  ),
-                ],
-              ),
-            ),
+          Wrap(
+            spacing: 8,
+            children: ['all', 'assigned', 'unassigned'].map((s) {
+              return ChoiceChip(
+                label: Text(s.toUpperCase()),
+                selected: _volunteersFilter == s,
+                onSelected: (_) => setState(() => _volunteersFilter = s),
+              );
+            }).toList(),
           ),
-          const SizedBox(height: 10),
-          // Task list
-          if (_tasks.isEmpty)
+          const SizedBox(height: 12),
+          if (filtered.isEmpty)
             const Card(
               child: Padding(
-                padding: EdgeInsets.all(14),
-                child: Text('No tasks yet.'),
+                padding: EdgeInsets.all(24),
+                child: Center(child: Text('No volunteers found.')),
               ),
             )
           else
-            ..._tasks.map(_buildTaskCard),
+            ...filtered.map((v) {
+              final id = v['id'].toString();
+              final name = (v['full_name'] ?? 'Unnamed').toString();
+              final email = (v['email'] ?? '').toString();
+              final verified = v['is_verified'] == true;
+              final available = v['is_available'] == true;
+              final expanded = _expandedVolunteers.contains(id);
+              final assignedTasks = _tasks
+                  .where((t) => t['volunteer_id']?.toString() == id)
+                  .toList();
+
+              return Card(
+                child: InkWell(
+                  onTap: () => setState(() {
+                    expanded
+                        ? _expandedVolunteers.remove(id)
+                        : _expandedVolunteers.add(id);
+                  }),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              backgroundColor: AppColors.primaryGreen,
+                              foregroundColor: Colors.white,
+                              child: Text(
+                                name.isNotEmpty ? name[0].toUpperCase() : '?',
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    name,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Text(
+                                    email,
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (verified)
+                              const Icon(
+                                Icons.verified,
+                                color: AppColors.primaryGreen,
+                                size: 18,
+                              ),
+                            const SizedBox(width: 4),
+                            Chip(
+                              label: Text(
+                                available ? 'ONLINE' : 'OFFLINE',
+                                style: const TextStyle(fontSize: 9),
+                              ),
+                              padding: EdgeInsets.zero,
+                              visualDensity: VisualDensity.compact,
+                              backgroundColor: available
+                                  ? Colors.green.shade50
+                                  : Colors.grey.shade200,
+                            ),
+                            Icon(
+                              expanded ? Icons.expand_less : Icons.expand_more,
+                              size: 20,
+                            ),
+                          ],
+                        ),
+                        if (expanded) ...[
+                          const Divider(height: 16),
+                          Text(
+                            'Assigned Tasks (${assignedTasks.length})',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (assignedTasks.isEmpty)
+                            const Text(
+                              'No tasks assigned.',
+                              style: TextStyle(fontSize: 12),
+                            )
+                          else
+                            ...assignedTasks.map(
+                              (t) => Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.circle,
+                                      size: 6,
+                                      color: AppColors.primaryGreen,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        '${t['title'] ?? t['type']} — ${(t['status'] ?? 'pending').toString().toUpperCase()}',
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
         ],
+      ),
+    );
+  }
+
+  // ── Tasks ──────────────────────────────────────────────────────────
+  void _openTaskForm() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+                left: 24,
+                right: 24,
+                top: 32,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Create Task',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _titleCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Title',
+                        prefixIcon: Icon(Icons.task_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _typeCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Type',
+                        prefixIcon: Icon(Icons.category_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _descCtrl,
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                        labelText: 'Description',
+                        prefixIcon: Icon(Icons.notes_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _openVolunteerPanel();
+                      },
+                      icon: const Icon(Icons.person_add_outlined),
+                      label: Text(
+                        _selectedVolunteers.isEmpty
+                            ? 'Select Volunteers'
+                            : '${_selectedVolunteers.length} selected',
+                      ),
+                    ),
+                    if (_selectedVolunteers.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: _selectedVolunteers.map((v) {
+                            return Chip(
+                              label: Text(
+                                (v['full_name'] ?? 'Unnamed').toString(),
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              onDeleted: () {
+                                setSheetState(() {
+                                  _selectedVolunteers.removeWhere(
+                                    (sv) => sv['id'] == v['id'],
+                                  );
+                                });
+                                setState(() {
+                                  _selectedVolunteers.removeWhere(
+                                    (sv) => sv['id'] == v['id'],
+                                  );
+                                });
+                              },
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _creating
+                            ? null
+                            : () {
+                                Navigator.pop(ctx);
+                                _createTask();
+                              },
+                        icon: const Icon(Icons.add_task),
+                        label: const Text('Create Task'),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildTasksTab() {
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _openTaskForm,
+        icon: const Icon(Icons.add),
+        label: const Text('New Task'),
+      ),
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          padding: const EdgeInsets.only(
+            top: 12,
+            left: 12,
+            right: 12,
+            bottom: 80,
+          ),
+          children: [
+            // Task list
+            if (_tasks.isEmpty)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(14),
+                  child: Text('No tasks yet.'),
+                ),
+              )
+            else
+              ..._tasks.map(_buildTaskCard),
+          ],
+        ),
       ),
     );
   }

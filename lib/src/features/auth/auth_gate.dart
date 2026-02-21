@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:clerk_auth/clerk_auth.dart' as clerk;
 import 'package:clerk_flutter/clerk_flutter.dart';
 import 'package:flutter/material.dart';
@@ -8,10 +11,8 @@ import '../../core/models.dart';
 import '../../theme/app_colors.dart';
 import '../assignments/assignments_tab.dart';
 import '../coordinator/coordinator_dashboard_tab.dart';
-import '../coordinator/coordinator_needs_tab.dart';
+import '../coordinator/coordinator_operations_tab.dart';
 import '../coordinator/coordinator_sos_tab.dart';
-import '../coordinator/coordinator_tasks_tab.dart';
-import '../coordinator/coordinator_volunteers_tab.dart';
 import '../home/home_tab.dart';
 import '../map/map_tab.dart';
 import '../missing/missing_tab.dart';
@@ -77,6 +78,18 @@ class _AuthGateState extends State<AuthGate> {
       if (!mounted) return;
       setState(() {
         _user = user;
+        _loading = false;
+      });
+    } on SocketException catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Server Unreachable - Please check your connection.';
+        _loading = false;
+      });
+    } on TimeoutException catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Connection Timed Out - Server Unreachable.';
         _loading = false;
       });
     } catch (e) {
@@ -179,7 +192,7 @@ class _GeneralAppShellState extends State<GeneralAppShell> {
 
     return Scaffold(
       appBar: AppBar(
-        titleSpacing: 10,
+        titleSpacing: 24,
         title: Row(
           children: [
             ClipRRect(
@@ -190,19 +203,20 @@ class _GeneralAppShellState extends State<GeneralAppShell> {
                 height: 28,
               ),
             ),
-            const SizedBox(width: 8),
-            Text(_titles[_index]),
+            const SizedBox(width: 12),
+            Text(
+              _titles[_index],
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         actions: [
+          IconButton(onPressed: () {}, icon: const Icon(Icons.search)),
           IconButton(
             onPressed: _showNotifications,
             icon: const Icon(Icons.notifications_none),
           ),
-          const Padding(
-            padding: EdgeInsets.only(right: 10),
-            child: ClerkUserButton(),
-          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: IndexedStack(index: _index, children: tabs),
@@ -254,14 +268,7 @@ class CoordinatorAppShell extends StatefulWidget {
 class _CoordinatorAppShellState extends State<CoordinatorAppShell> {
   int _index = 0;
 
-  static const _titles = [
-    'Dashboard',
-    'Volunteers',
-    'Tasks',
-    'Needs',
-    'SOS',
-    'Profile',
-  ];
+  static const _titles = ['Dashboard', 'Map', 'Operations', 'SOS', 'Profile'];
 
   void _showNotifications() {
     ScaffoldMessenger.of(
@@ -277,16 +284,15 @@ class _CoordinatorAppShellState extends State<CoordinatorAppShell> {
         user: widget.user,
         onNavigate: (index) => setState(() => _index = index),
       ),
-      CoordinatorVolunteersTab(api: widget.api),
-      CoordinatorTasksTab(api: widget.api),
-      CoordinatorNeedsTab(api: widget.api),
+      MapTab(api: widget.api),
+      CoordinatorOperationsTab(api: widget.api),
       CoordinatorSosTab(api: widget.api),
       ProfileTab(api: widget.api, user: widget.user),
     ];
 
     return Scaffold(
       appBar: AppBar(
-        titleSpacing: 10,
+        titleSpacing: 24, // spacing horizontally for header
         title: Row(
           children: [
             ClipRRect(
@@ -297,27 +303,20 @@ class _CoordinatorAppShellState extends State<CoordinatorAppShell> {
                 height: 28,
               ),
             ),
-            const SizedBox(width: 8),
-            Text(_titles[_index]),
+            const SizedBox(width: 12),
+            Text(
+              _titles[_index],
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         actions: [
+          IconButton(onPressed: () {}, icon: const Icon(Icons.search)),
           IconButton(
             onPressed: _showNotifications,
             icon: const Icon(Icons.notifications_none),
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: Center(
-              child: Text(
-                widget.user.role.toUpperCase(),
-                style: const TextStyle(
-                  color: AppColors.primaryGreen,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: IndexedStack(index: _index, children: tabs),
@@ -331,19 +330,14 @@ class _CoordinatorAppShellState extends State<CoordinatorAppShell> {
             label: 'Dashboard',
           ),
           NavigationDestination(
-            icon: Icon(Icons.people_outline),
-            selectedIcon: Icon(Icons.people),
-            label: 'Volunteers',
+            icon: Icon(Icons.map_outlined),
+            selectedIcon: Icon(Icons.map),
+            label: 'Map',
           ),
           NavigationDestination(
-            icon: Icon(Icons.assignment_outlined),
-            selectedIcon: Icon(Icons.assignment),
-            label: 'Tasks',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.report_problem_outlined),
-            selectedIcon: Icon(Icons.report_problem),
-            label: 'Needs',
+            icon: Icon(Icons.admin_panel_settings_outlined),
+            selectedIcon: Icon(Icons.admin_panel_settings),
+            label: 'Operations',
           ),
           NavigationDestination(
             icon: Icon(Icons.sos_outlined),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
 import '../../theme/app_colors.dart';
+import '../missing/missing_tab.dart';
 
 class CoordinatorSosTab extends StatefulWidget {
   const CoordinatorSosTab({super.key, required this.api});
@@ -84,6 +85,30 @@ class _CoordinatorSosTabState extends State<CoordinatorSosTab> {
 
   @override
   Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 2,
+      child: Column(
+        children: [
+          const TabBar(
+            tabs: [
+              Tab(text: 'SOS Alerts'),
+              Tab(text: 'Missing Persons'),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
+              children: [
+                _buildSosTab(),
+                MissingTab(api: widget.api),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSosTab() {
     if (_loading) return const Center(child: CircularProgressIndicator());
 
     return RefreshIndicator(

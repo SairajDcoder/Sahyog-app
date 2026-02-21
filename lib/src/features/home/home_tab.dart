@@ -57,7 +57,9 @@ class _HomeTabState extends State<HomeTab> {
 
       Position? pos;
       try {
-        pos = await _locationService.getCurrentPosition();
+        pos = await _locationService.getCurrentPosition().timeout(
+          const Duration(seconds: 5),
+        );
       } catch (_) {}
 
       final disastersRaw = await widget.api.get('/api/v1/disasters');
@@ -135,15 +137,9 @@ class _HomeTabState extends State<HomeTab> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text(
-            'Welcome, ${widget.user.name}',
-            style: Theme.of(
-              context,
-            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           _RoleChip(role: widget.user.role),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           if (_error.isNotEmpty)
             Text(_error, style: const TextStyle(color: AppColors.criticalRed)),
           Card(
@@ -194,7 +190,7 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   Widget _buildMiniMap() {
-    LatLng center = const LatLng(28.6139, 77.2090);
+    LatLng center = const LatLng(18.5204, 73.8567);
     if (_position != null) {
       center = LatLng(_position!.latitude, _position!.longitude);
     } else if (_zones.isNotEmpty) {
@@ -306,17 +302,22 @@ class _RoleChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: AppColors.primaryGreen.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Text(
-        role.toUpperCase(),
-        style: const TextStyle(
-          color: AppColors.primaryGreen,
-          fontWeight: FontWeight.w700,
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppColors.primaryGreen.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          role.toUpperCase(),
+          style: const TextStyle(
+            color: AppColors.primaryGreen,
+            fontWeight: FontWeight.w800,
+            fontSize: 12,
+            letterSpacing: 1.1,
+          ),
         ),
       ),
     );

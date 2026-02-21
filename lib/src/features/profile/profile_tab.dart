@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:clerk_flutter/clerk_flutter.dart';
 import 'package:flutter/material.dart';
 
@@ -21,15 +23,28 @@ class _ProfileTabState extends State<ProfileTab> {
   bool _busy = false;
   bool _availability = true;
 
+  Timer? _locationTimer;
+
   @override
   void initState() {
     super.initState();
     _availability = widget.user.isActive;
+    _locationTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (_trackingEnabled && mounted) {
+        _syncLocationOnce(silent: true);
+      }
+    });
   }
 
-  Future<void> _syncLocationOnce() async {
+  @override
+  void dispose() {
+    _locationTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _syncLocationOnce({bool silent = false}) async {
     try {
-      setState(() => _busy = true);
+      if (!silent) setState(() => _busy = true);
 
       final location = await LocationService().getCurrentPosition();
 
@@ -39,16 +54,20 @@ class _ProfileTabState extends State<ProfileTab> {
       );
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Location synced successfully')),
-      );
+      if (!silent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location synced successfully')),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Location sync failed: $e')));
+      if (!silent) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Location sync failed: $e')));
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && !silent) setState(() => _busy = false);
     }
   }
 

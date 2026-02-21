@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/api_client.dart';
 import '../../core/models.dart';
 import '../../theme/app_colors.dart';
+import 'task_detail_screen.dart';
 
 class AssignmentsTab extends StatefulWidget {
   const AssignmentsTab({super.key, required this.api, required this.user});
@@ -17,16 +18,11 @@ class AssignmentsTab extends StatefulWidget {
 }
 
 class _AssignmentsTabState extends State<AssignmentsTab> {
-  final _taskTitleCtrl = TextEditingController();
-  final _taskTypeCtrl = TextEditingController(text: 'field_support');
-  final _taskDescCtrl = TextEditingController();
-
   List<Map<String, dynamic>> _assignments = [];
   List<Map<String, dynamic>> _pendingTasks = [];
   List<Map<String, dynamic>> _taskHistory = [];
 
   bool _loading = true;
-  bool _creating = false;
   String _error = '';
   Timer? _pollTimer;
 
@@ -42,9 +38,6 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
   @override
   void dispose() {
     _pollTimer?.cancel();
-    _taskTitleCtrl.dispose();
-    _taskTypeCtrl.dispose();
-    _taskDescCtrl.dispose();
     super.dispose();
   }
 
@@ -128,94 +121,6 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
     }
   }
 
-  Future<void> _createVolunteerTask() async {
-    if (_taskTitleCtrl.text.trim().isEmpty ||
-        _taskTypeCtrl.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Task title and type are required.')),
-      );
-      return;
-    }
-
-    try {
-      setState(() => _creating = true);
-      await widget.api.post(
-        '/api/v1/tasks',
-        body: {
-          'title': _taskTitleCtrl.text.trim(),
-          'type': _taskTypeCtrl.text.trim(),
-          'description': _taskDescCtrl.text.trim().isEmpty
-              ? null
-              : _taskDescCtrl.text.trim(),
-        },
-      );
-
-      if (!mounted) return;
-      _taskTitleCtrl.clear();
-      _taskDescCtrl.clear();
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Task created.')));
-      await _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Task creation failed: $e')));
-    } finally {
-      if (mounted) setState(() => _creating = false);
-    }
-  }
-
-  Future<void> _updateTaskStatus(String taskId, String status) async {
-    try {
-      await widget.api.patch(
-        '/api/v1/tasks/$taskId/status',
-        body: {'status': status},
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Task updated: $status')));
-      await _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Update failed: $e')));
-    }
-  }
-
-  Future<void> _voteTaskCompletion(String taskId, String vote) async {
-    try {
-      final raw = await widget.api.post(
-        '/api/v1/tasks/$taskId/vote-completion',
-        body: {'vote': vote, 'note': 'Mobile volunteer vote'},
-      );
-      final summary =
-          (raw is Map<String, dynamic> &&
-              raw['summary'] is Map<String, dynamic>)
-          ? raw['summary'] as Map<String, dynamic>
-          : <String, dynamic>{};
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Vote recorded. ${summary['completed_votes'] ?? 0}/${summary['required_votes'] ?? 0} completion votes.',
-          ),
-        ),
-      );
-      await _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Vote failed: $e')));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -233,15 +138,61 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
       );
     }
 
+    if (widget.user.isVolunteer) {
+      return DefaultTabController(
+        length: 2,
+        child: Column(
+          children: [
+            const TabBar(
+              tabs: [
+                Tab(text: 'Active Tasks'),
+                Tab(text: 'History'),
+              ],
+            ),
+            if (_error.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Text(
+                  _error,
+                  style: const TextStyle(color: AppColors.criticalRed),
+                ),
+              ),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  RefreshIndicator(
+                    onRefresh: _load,
+                    child: ListView(
+                      padding: const EdgeInsets.all(16),
+                      children: [
+                        _buildVolunteerAssignments(),
+                        const SizedBox(height: 12),
+                        _buildPendingTasks(),
+                      ],
+                    ),
+                  ),
+                  RefreshIndicator(
+                    onRefresh: _load,
+                    child: ListView(
+                      padding: const EdgeInsets.all(16),
+                      children: [_buildTaskHistory()],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Text(
-            widget.user.isVolunteer
-                ? 'Volunteer Operations'
-                : 'Coordinator Needs Dashboard',
+            'Coordinator Needs Dashboard',
             style: Theme.of(
               context,
             ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
@@ -249,69 +200,8 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
           const SizedBox(height: 8),
           if (_error.isNotEmpty)
             Text(_error, style: const TextStyle(color: AppColors.criticalRed)),
-
-          if (widget.user.isVolunteer) ...[
-            _buildVolunteerTaskCreateCard(),
-            const SizedBox(height: 12),
-            _buildVolunteerAssignments(),
-            const SizedBox(height: 12),
-            _buildPendingTasks(),
-            const SizedBox(height: 12),
-            _buildTaskHistory(),
-          ] else ...[
-            _buildCoordinatorNeeds(),
-          ],
+          _buildCoordinatorNeeds(),
         ],
-      ),
-    );
-  }
-
-  Widget _buildVolunteerTaskCreateCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Create Task',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _taskTitleCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Task Title',
-                prefixIcon: Icon(Icons.task_outlined),
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _taskTypeCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Task Type',
-                prefixIcon: Icon(Icons.category_outlined),
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _taskDescCtrl,
-              maxLines: 2,
-              decoration: const InputDecoration(
-                labelText: 'Description',
-                prefixIcon: Icon(Icons.notes_outlined),
-              ),
-            ),
-            const SizedBox(height: 10),
-            FilledButton.icon(
-              onPressed: _creating ? null : _createVolunteerTask,
-              icon: const Icon(Icons.add_task),
-              label: const Text('Create Task'),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -407,46 +297,51 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
           )
         else
           ..._pendingTasks.map((task) {
-            final id = (task['id'] ?? '').toString();
             final status = (task['status'] ?? 'pending').toString();
+            final volunteerId = task['volunteer_id'];
+            final isUnassigned = volunteerId == null;
+
             return Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      (task['title'] ?? task['type'] ?? 'Task').toString(),
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                onTap: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => TaskDetailScreen(
+                        api: widget.api,
+                        user: widget.user,
+                        task: task,
+                      ),
                     ),
-                    const SizedBox(height: 6),
-                    Text('Status: $status'),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        OutlinedButton(
-                          onPressed: id.isEmpty
-                              ? null
-                              : () => _updateTaskStatus(id, 'in_progress'),
-                          child: const Text('Start'),
-                        ),
-                        FilledButton.tonal(
-                          onPressed: id.isEmpty
-                              ? null
-                              : () => _updateTaskStatus(id, 'completed'),
-                          child: const Text('Close Task'),
-                        ),
-                        TextButton(
-                          onPressed: id.isEmpty
-                              ? null
-                              : () => _voteTaskCompletion(id, 'completed'),
-                          child: const Text('Vote Complete'),
-                        ),
-                      ],
-                    ),
-                  ],
+                  );
+                  _load(silent: true);
+                },
+                leading: CircleAvatar(
+                  backgroundColor: isUnassigned
+                      ? Colors.orange.withValues(alpha: 0.1)
+                      : AppColors.primaryGreen.withValues(alpha: 0.1),
+                  child: Icon(
+                    isUnassigned ? Icons.assignment : Icons.assignment_ind,
+                    color: isUnassigned
+                        ? Colors.orange
+                        : AppColors.primaryGreen,
+                  ),
                 ),
+                title: Text(
+                  (task['title'] ?? task['type'] ?? 'Task').toString(),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(
+                  isUnassigned
+                      ? 'Unassigned • Click to Accept'
+                      : 'Status: $status',
+                  style: TextStyle(
+                    color: isUnassigned ? Colors.orange[800] : null,
+                    fontWeight: isUnassigned ? FontWeight.bold : null,
+                  ),
+                ),
+                trailing: const Icon(Icons.chevron_right),
               ),
             );
           }),

@@ -17,6 +17,7 @@ class MissingTab extends StatefulWidget {
 class _MissingTabState extends State<MissingTab> {
   final _nameCtrl = TextEditingController();
   final _ageCtrl = TextEditingController();
+  final _descCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _photoCtrl = TextEditingController();
   final _locService = LocationService();
@@ -43,6 +44,7 @@ class _MissingTabState extends State<MissingTab> {
     _pollTimer?.cancel();
     _nameCtrl.dispose();
     _ageCtrl.dispose();
+    _descCtrl.dispose();
     _phoneCtrl.dispose();
     _photoCtrl.dispose();
     super.dispose();
@@ -71,22 +73,6 @@ class _MissingTabState extends State<MissingTab> {
     }
   }
 
-  Future<void> _useCurrentLocation() async {
-    try {
-      final p = await _locService.getCurrentPosition();
-      if (!mounted) return;
-      setState(() {
-        _lat = p.latitude;
-        _lng = p.longitude;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Location unavailable: $e')));
-    }
-  }
-
   Future<void> _submitReport() async {
     if (_phoneCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -102,6 +88,9 @@ class _MissingTabState extends State<MissingTab> {
         'reporter_phone': _phoneCtrl.text.trim(),
         'name': _nameCtrl.text.trim().isEmpty ? null : _nameCtrl.text.trim(),
         'age': int.tryParse(_ageCtrl.text.trim()),
+        'description': _descCtrl.text.trim().isEmpty
+            ? null
+            : _descCtrl.text.trim(),
         'photo_urls': _photoCtrl.text.trim().isEmpty
             ? []
             : [_photoCtrl.text.trim()],
@@ -120,6 +109,7 @@ class _MissingTabState extends State<MissingTab> {
 
       _nameCtrl.clear();
       _ageCtrl.clear();
+      _descCtrl.clear();
       _photoCtrl.clear();
       _lat = null;
       _lng = null;
@@ -162,9 +152,7 @@ class _MissingTabState extends State<MissingTab> {
       ),
     );
     noteCtrl.dispose();
-
     if (note == null) return;
-
     try {
       await widget.api.patch(
         '/api/v1/missing/$missingId/found',
@@ -183,36 +171,154 @@ class _MissingTabState extends State<MissingTab> {
     }
   }
 
+  void _showReportForm() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+                left: 24,
+                right: 24,
+                top: 32,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Report Missing Person',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _phoneCtrl,
+                      keyboardType: TextInputType.phone,
+                      decoration: const InputDecoration(
+                        labelText: 'Reporter Phone *',
+                        prefixIcon: Icon(Icons.phone),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _nameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Missing Person Name',
+                        prefixIcon: Icon(Icons.person),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _ageCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Approximate Age',
+                        prefixIcon: Icon(Icons.cake_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _descCtrl,
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                        labelText:
+                            'Description (Appearance, Last Seen Details)',
+                        prefixIcon: Icon(Icons.description_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _photoCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Photo URL (Optional)',
+                        prefixIcon: Icon(Icons.photo_camera_back_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: () async {
+                            try {
+                              final p = await _locService.getCurrentPosition();
+                              setSheetState(() {
+                                _lat = p.latitude;
+                                _lng = p.longitude;
+                              });
+                              setState(() {
+                                _lat = p.latitude;
+                                _lng = p.longitude;
+                              });
+                            } catch (e) {
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Location unavailable: $e'),
+                                ),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.my_location),
+                          label: const Text('Use Current Location'),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _lat == null || _lng == null
+                                ? 'Location not selected'
+                                : '${_lat!.toStringAsFixed(4)}, ${_lng!.toStringAsFixed(4)}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: _submitting
+                            ? null
+                            : () {
+                                Navigator.pop(ctx);
+                                _submitReport();
+                              },
+                        child: const Text('Submit Report'),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Column(
-        children: [
-          const SizedBox(height: 8),
-          const TabBar(
-            tabs: [
-              Tab(text: 'Missing Board'),
-              Tab(text: 'Report Missing'),
-            ],
-          ),
-          Expanded(
-            child: TabBarView(
-              children: [
-                RefreshIndicator(
-                  onRefresh: _loadBoard,
-                  child: _loadingBoard
-                      ? const Center(child: CircularProgressIndicator())
-                      : _buildBoard(),
-                ),
-                SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: _buildForm(),
-                ),
-              ],
-            ),
-          ),
-        ],
+    return Scaffold(
+      body: RefreshIndicator(
+        onRefresh: _loadBoard,
+        child: _loadingBoard
+            ? const Center(child: CircularProgressIndicator())
+            : _buildBoard(),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showReportForm,
+        icon: const Icon(Icons.add),
+        label: const Text('Report Missing'),
       ),
     );
   }
@@ -255,118 +361,86 @@ class _MissingTabState extends State<MissingTab> {
         final item = _board[index] as Map<String, dynamic>;
         final status = (item['status'] ?? 'missing').toString();
         final name = (item['name'] ?? 'Unnamed').toString();
+        final photos = item['photo_urls'] as List?;
+        final desc = item['description']?.toString() ?? '';
+        final imageUrl = (photos != null && photos.isNotEmpty)
+            ? photos.first.toString()
+            : '';
+
         return Card(
           child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: status == 'found'
-                    ? AppColors.primaryGreen.withValues(alpha: 0.15)
-                    : AppColors.criticalRed.withValues(alpha: 0.15),
-                child: Icon(
-                  status == 'found' ? Icons.verified : Icons.person_search,
-                  color: status == 'found'
-                      ? AppColors.primaryGreen
-                      : AppColors.criticalRed,
+            padding: const EdgeInsets.all(12.0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  backgroundColor: status == 'found'
+                      ? AppColors.primaryGreen.withValues(alpha: 0.15)
+                      : AppColors.criticalRed.withValues(alpha: 0.15),
+                  backgroundImage: imageUrl.isNotEmpty
+                      ? NetworkImage(imageUrl)
+                      : null,
+                  child: imageUrl.isEmpty
+                      ? Icon(
+                          status == 'found'
+                              ? Icons.verified
+                              : Icons.person_search,
+                          size: 28,
+                          color: status == 'found'
+                              ? AppColors.primaryGreen
+                              : AppColors.criticalRed,
+                        )
+                      : null,
                 ),
-              ),
-              title: Text(name),
-              subtitle: Text(
-                'Age: ${item['age'] ?? 'Unknown'} • Status: $status',
-              ),
-              trailing: status == 'found'
-                  ? const Chip(label: Text('FOUND'))
-                  : FilledButton.tonal(
-                      onPressed: () =>
-                          _markFound((item['id'] ?? '').toString()),
-                      child: const Text('Mark Found'),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Age: ${item['age'] ?? 'Unknown'} • Status: ${status.toUpperCase()}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      if (desc.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          desc,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (status == 'found')
+                  const Chip(label: Text('FOUND'))
+                else
+                  IconButton(
+                    onPressed: () => _markFound((item['id'] ?? '').toString()),
+                    icon: const Icon(
+                      Icons.check_circle_outline,
+                      color: AppColors.primaryGreen,
                     ),
+                    tooltip: 'Mark Found',
+                  ),
+              ],
             ),
           ),
         );
       },
-    );
-  }
-
-  Widget _buildForm() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Report Missing Person',
-          style: Theme.of(
-            context,
-          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _phoneCtrl,
-          keyboardType: TextInputType.phone,
-          decoration: const InputDecoration(
-            labelText: 'Reporter Phone *',
-            prefixIcon: Icon(Icons.phone),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _nameCtrl,
-          decoration: const InputDecoration(
-            labelText: 'Missing Person Name',
-            prefixIcon: Icon(Icons.person),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _ageCtrl,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Approximate Age',
-            prefixIcon: Icon(Icons.cake_outlined),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _photoCtrl,
-          decoration: const InputDecoration(
-            labelText: 'Photo URL (Optional)',
-            prefixIcon: Icon(Icons.photo_camera_back_outlined),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            ElevatedButton.icon(
-              onPressed: _useCurrentLocation,
-              icon: const Icon(Icons.my_location),
-              label: const Text('Use Current Location'),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                _lat == null || _lng == null
-                    ? 'Location not selected'
-                    : '${_lat!.toStringAsFixed(4)}, ${_lng!.toStringAsFixed(4)}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 20),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            onPressed: _submitting ? null : _submitReport,
-            child: _submitting
-                ? const SizedBox(
-                    height: 18,
-                    width: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Submit Report'),
-          ),
-        ),
-      ],
     );
   }
 }

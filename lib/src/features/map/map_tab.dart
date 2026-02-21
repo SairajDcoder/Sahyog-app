@@ -22,7 +22,7 @@ class _MapTabState extends State<MapTab> {
   final _locationService = LocationService();
   final MapController _mapController = MapController();
 
-  LatLng _center = const LatLng(28.6139, 77.2090);
+  LatLng _center = const LatLng(18.5204, 73.8567); // Pune default
   List<_ZoneCircle> _zones = [];
   final List<_ZoneCircle> _userMarkedZones = [];
   List<_ResourceMarker> _resources = [];
@@ -43,8 +43,13 @@ class _MapTabState extends State<MapTab> {
       });
 
       try {
-        final pos = await _locationService.getCurrentPosition();
-        _center = LatLng(pos.latitude, pos.longitude);
+        // We still fetch position for the "My Location" marker, but we don't move the map center automatically
+        // to avoid jumping to San Francisco (emulator default) on app open.
+        final pos = await _locationService.getCurrentPosition().timeout(
+          const Duration(seconds: 3),
+        );
+        if (mounted)
+          setState(() => _center = LatLng(pos.latitude, pos.longitude));
       } catch (_) {}
 
       // Fetch zones, resources, and sos
@@ -197,7 +202,9 @@ class _MapTabState extends State<MapTab> {
                   FlutterMap(
                     mapController: _mapController,
                     options: MapOptions(
-                      initialCenter: _center,
+                      initialCenter: _zones.isNotEmpty
+                          ? _zones.first.center
+                          : _center,
                       initialZoom: 12,
                       onLongPress: (tapPosition, latLng) {
                         setState(() {
@@ -263,46 +270,44 @@ class _MapTabState extends State<MapTab> {
                             point: r.point,
                             width: 120,
                             height: 60,
-                            child: Column(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isSos
-                                        ? AppColors.criticalRed
-                                        : Colors.white,
-                                    borderRadius: BorderRadius.circular(10),
-                                    boxShadow: const [
-                                      BoxShadow(
-                                        blurRadius: 6,
-                                        color: Color(0x22000000),
+                            child: isSos
+                                ? _SosMarker()
+                                : Column(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                          boxShadow: const [
+                                            BoxShadow(
+                                              blurRadius: 6,
+                                              color: Color(0x22000000),
+                                            ),
+                                          ],
+                                        ),
+                                        child: Text(
+                                          r.type,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.black,
+                                          ),
+                                        ),
+                                      ),
+                                      const Icon(
+                                        Icons.location_on,
+                                        color: AppColors.primaryGreen,
+                                        size: 26,
                                       ),
                                     ],
                                   ),
-                                  child: Text(
-                                    r.type,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      color: isSos
-                                          ? Colors.white
-                                          : Colors.black,
-                                    ),
-                                  ),
-                                ),
-                                Icon(
-                                  isSos ? Icons.sos : Icons.location_on,
-                                  color: isSos
-                                      ? AppColors.criticalRed
-                                      : AppColors.primaryGreen,
-                                  size: 26,
-                                ),
-                              ],
-                            ),
                           );
                         }).toList(),
                       ),
@@ -310,10 +315,35 @@ class _MapTabState extends State<MapTab> {
                   ),
                   Positioned(
                     right: 16,
-                    bottom: 16,
+                    bottom: 60, // moved up to avoid overlapping with FAB
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        FloatingActionButton(
+                          heroTag: "map_my_location",
+                          mini: true,
+                          onPressed: () async {
+                            try {
+                              final pos = await _locationService
+                                  .getCurrentPosition()
+                                  .timeout(const Duration(seconds: 5));
+                              final ll = LatLng(pos.latitude, pos.longitude);
+                              _mapController.move(ll, 15);
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Location unavailable: $e'),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          backgroundColor: Colors.white,
+                          foregroundColor: AppColors.primaryGreen,
+                          child: const Icon(Icons.my_location),
+                        ),
+                        const SizedBox(height: 8),
                         FloatingActionButton(
                           heroTag: "map_zoom_in",
                           mini: true,
@@ -442,4 +472,80 @@ class _ResourceMarker {
   final String type;
   final String status;
   final LatLng point;
+}
+
+class _SosMarker extends StatefulWidget {
+  @override
+  State<_SosMarker> createState() => _SosMarkerState();
+}
+
+class _SosMarkerState extends State<_SosMarker>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            // Outer Ring
+            Container(
+              width: 50 * _controller.value,
+              height: 50 * _controller.value,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.criticalRed.withValues(
+                  alpha: (1.0 - _controller.value) * 0.4,
+                ),
+                border: Border.all(
+                  color: AppColors.criticalRed.withValues(
+                    alpha: (1.0 - _controller.value) * 0.6,
+                  ),
+                  width: 1,
+                ),
+              ),
+            ),
+            // Middle Ring
+            Container(
+              width: 30 * _controller.value,
+              height: 30 * _controller.value,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.criticalRed.withValues(
+                  alpha: (1.0 - _controller.value) * 0.3,
+                ),
+              ),
+            ),
+            // Solid Center Dot
+            Container(
+              width: 12,
+              height: 12,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.criticalRed,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 }
