@@ -11,6 +11,7 @@ import '../../core/models.dart';
 import '../../theme/app_colors.dart';
 import '../../core/connectivity_service.dart';
 import '../../core/socket_service.dart';
+import '../../core/ble_scanner_service.dart';
 import '../assignments/assignments_tab.dart';
 import '../coordinator/coordinator_dashboard_tab.dart';
 import '../coordinator/coordinator_operations_tab.dart';
@@ -98,6 +99,10 @@ class _AuthGateState extends State<AuthGate> {
         context,
         user.isCoordinator || user.isAdmin,
       );
+
+      // Initialize BLE Mesh scanner for everyone (all users can relay)
+      BleScannerService.instance.initialize(_api, user.id);
+      BleScannerService.instance.startScanning();
 
       setState(() {
         _user = user;

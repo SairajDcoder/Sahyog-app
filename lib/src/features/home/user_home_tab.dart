@@ -12,6 +12,7 @@ import '../../core/socket_service.dart';
 import '../../core/database_helper.dart';
 import '../../core/sos_state_machine.dart';
 import '../../core/sos_sync_engine.dart';
+import '../../core/ble_advertiser_service.dart';
 import '../../theme/app_colors.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
@@ -57,6 +58,9 @@ class _UserHomeTabState extends State<UserHomeTab>
     SocketService.instance.onSosResolved.addListener(_onRemoteSosResolved);
     SosSyncEngine.instance.syncCompletionNotifier.addListener(
       _onBackgroundSyncComplete,
+    );
+    BleAdvertiserService.instance.ackReceivedNotifier.addListener(
+      _onBleAckReceived,
     );
   }
 
@@ -125,6 +129,44 @@ class _UserHomeTabState extends State<UserHomeTab>
     });
   }
 
+  void _onBleAckReceived() async {
+    final uuidHash = BleAdvertiserService.instance.ackReceivedNotifier.value;
+    if (uuidHash == null || _activeLocalUuid == null) return;
+
+    final db = DatabaseHelper.instance;
+    final incident = await db.getIncidentByUuid(_activeLocalUuid!);
+    if (incident != null && incident.uuidHash == uuidHash) {
+      if (SosStateMachine.canTransition(
+        incident.status,
+        SosStatus.acknowledged,
+      )) {
+        await db.atomicUpdateIncident(
+          incident.uuid,
+          status: SosStatus.acknowledged,
+        );
+        SosLog.event(
+          incident.uuid,
+          'ACK_VIA_BLE',
+          'Mesh responder help coming',
+        );
+
+        // Stop advertiser since we're acknowledged
+        await BleAdvertiserService.instance.stopAdvertising(
+          reason: 'ack_received',
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Help is on the way! (Received via BLE Mesh)'),
+              backgroundColor: AppColors.primaryGreen,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   @override
   void dispose() {
     _pollTimer?.cancel();
@@ -133,6 +175,9 @@ class _UserHomeTabState extends State<UserHomeTab>
     SocketService.instance.onSosResolved.removeListener(_onRemoteSosResolved);
     SosSyncEngine.instance.syncCompletionNotifier.removeListener(
       _onBackgroundSyncComplete,
+    );
+    BleAdvertiserService.instance.ackReceivedNotifier.removeListener(
+      _onBleAckReceived,
     );
     super.dispose();
   }
@@ -230,6 +275,9 @@ class _UserHomeTabState extends State<UserHomeTab>
       _sosFired = true;
     });
 
+    // 4. Start BLE Mesh advertising immediately (zero-network resilience)
+    await BleAdvertiserService.instance.startAdvertising(incident);
+
     // 4. Check connectivity and attempt immediate sync
     final connectivityResult = await Connectivity().checkConnectivity();
     final isOnline = connectivityResult.any(
@@ -321,6 +369,12 @@ class _UserHomeTabState extends State<UserHomeTab>
     if (uuidToCancel != null) {
       await db.atomicUpdateIncident(uuidToCancel, status: SosStatus.cancelled);
       SosLog.event(uuidToCancel, 'CANCEL_SQLITE', 'status=cancelled');
+
+      // ── Stop BLE / Send Cancel Beacon ──
+      final incident = await db.getIncidentByUuid(uuidToCancel);
+      if (incident != null) {
+        await BleAdvertiserService.instance.emitCancelBeacon(incident);
+      }
     }
 
     // ── Case 1: Has backend ID — cancel on server ──
