@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
+import '../../core/socket_service.dart';
 import '../../core/models.dart';
 import '../../theme/app_colors.dart';
 import '../missing/missing_tab.dart';
@@ -59,6 +60,14 @@ class _CombinedSosTabState extends State<CombinedSosTab> {
           : <Map<String, dynamic>>[];
 
       if (!mounted) return;
+
+      // Seed the global indicator for anyone who can see these alerts (Coordinators, Volunteers, Admins)
+      if (widget.user.isCoordinator ||
+          widget.user.isVolunteer ||
+          widget.user.isAdmin) {
+        SocketService.instance.setInitialAlerts(list);
+      }
+
       setState(() {
         _alerts = list;
         _loading = false;
@@ -146,6 +155,7 @@ class _CombinedSosTabState extends State<CombinedSosTab> {
             ..._alerts.map((alert) {
               final id = (alert['id'] ?? '').toString();
               final status = (alert['status'] ?? 'triggered').toString();
+              final isActive = status == 'triggered';
               final reporterName =
                   (alert['reporter_name'] ??
                           alert['reporter_phone'] ??
@@ -153,67 +163,139 @@ class _CombinedSosTabState extends State<CombinedSosTab> {
                       .toString();
 
               return Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const CircleAvatar(
-                            backgroundColor: AppColors.criticalRed,
-                            foregroundColor: Colors.white,
-                            child: Icon(Icons.sos),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'SOS Alert',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
+                margin: const EdgeInsets.only(bottom: 12),
+                elevation: isActive ? 6 : 1,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(
+                    color: isActive
+                        ? AppColors.criticalRed
+                        : Colors.transparent,
+                    width: isActive ? 2 : 0,
+                  ),
+                ),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    color: isActive
+                        ? AppColors.criticalRed.withOpacity(0.06)
+                        : null,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              backgroundColor: isActive
+                                  ? AppColors.criticalRed
+                                  : Colors.grey.shade400,
+                              foregroundColor: Colors.white,
+                              child: Icon(
+                                isActive ? Icons.sos : Icons.check_circle,
                               ),
                             ),
-                          ),
-                          Chip(label: Text(status.toUpperCase())),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text('Reporter: $reporterName'),
-                      if (alert['media_urls'] is List &&
-                          (alert['media_urls'] as List).isNotEmpty)
-                        const Padding(
-                          padding: EdgeInsets.only(top: 4),
-                          child: Text('📎 Has media attachments'),
-                        ),
-                      const SizedBox(height: 8),
-                      if (widget.user.isCoordinator)
-                        Wrap(
-                          spacing: 8,
-                          children: [
-                            OutlinedButton(
-                              onPressed: id.isEmpty
-                                  ? null
-                                  : () => _updateStatus(id, 'acknowledged'),
-                              child: const Text('Acknowledge'),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                isActive ? '🔴 SOS ACTIVE' : 'SOS Alert',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 15,
+                                  color: isActive
+                                      ? AppColors.criticalRed
+                                      : null,
+                                ),
+                              ),
                             ),
-                            FilledButton.tonal(
-                              onPressed: id.isEmpty
-                                  ? null
-                                  : () => _updateStatus(id, 'resolved'),
-                              child: const Text('Resolve'),
-                            ),
+                            if (isActive)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColors.criticalRed,
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.circle,
+                                      color: Colors.white,
+                                      size: 8,
+                                    ),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      'LIVE',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 11,
+                                        letterSpacing: 1,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            else
+                              Chip(label: Text(status.toUpperCase())),
                           ],
-                        )
-                      else if (status == 'triggered')
-                        OutlinedButton.icon(
-                          onPressed: () => _updateStatus(id, 'cancelled'),
-                          icon: const Icon(Icons.cancel, size: 18),
-                          label: const Text('Cancel Request'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Reporter: $reporterName',
+                          style: TextStyle(
+                            fontWeight: isActive
+                                ? FontWeight.bold
+                                : FontWeight.normal,
                           ),
                         ),
-                    ],
+                        if (alert['media_urls'] is List &&
+                            (alert['media_urls'] as List).isNotEmpty)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 4),
+                            child: Text('📎 Has media attachments'),
+                          ),
+                        const SizedBox(height: 8),
+                        if (widget.user.isCoordinator)
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              OutlinedButton(
+                                onPressed: id.isEmpty
+                                    ? null
+                                    : () => _updateStatus(id, 'acknowledged'),
+                                child: const Text('Acknowledge'),
+                              ),
+                              FilledButton.tonal(
+                                onPressed: id.isEmpty
+                                    ? null
+                                    : () => _updateStatus(id, 'resolved'),
+                                style: isActive
+                                    ? FilledButton.styleFrom(
+                                        backgroundColor: AppColors.criticalRed,
+                                        foregroundColor: Colors.white,
+                                      )
+                                    : null,
+                                child: const Text('Resolve'),
+                              ),
+                            ],
+                          )
+                        else if (status == 'triggered')
+                          OutlinedButton.icon(
+                            onPressed: () => _updateStatus(id, 'cancelled'),
+                            icon: const Icon(Icons.cancel, size: 18),
+                            label: const Text('Cancel Request'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               );

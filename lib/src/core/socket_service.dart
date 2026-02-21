@@ -18,6 +18,10 @@ class SocketService {
     null,
   );
 
+  /// Tracks all currently active SOS alerts received via socket
+  final ValueNotifier<Map<String, Map<String, dynamic>>> liveSosAlerts =
+      ValueNotifier({});
+
   void initialize(BuildContext context, bool isCoordinatorOrAdmin) {
     if (_socket != null) return;
 
@@ -59,6 +63,15 @@ class SocketService {
         // Trigger a reload for any listening active boards & map
         if (data is Map<String, dynamic>) {
           onNewSosAlert.value = data;
+
+          final alerts = Map<String, Map<String, dynamic>>.from(
+            liveSosAlerts.value,
+          );
+          final id = data['id']?.toString();
+          if (id != null) {
+            alerts[id] = data;
+            liveSosAlerts.value = alerts;
+          }
         }
       }
     });
@@ -66,12 +79,36 @@ class SocketService {
     _socket!.on('sos_resolved', (data) {
       if (data is Map<String, dynamic>) {
         onSosResolved.value = data;
+
+        final id = data['id']?.toString();
+        if (id != null) {
+          final alerts = Map<String, Map<String, dynamic>>.from(
+            liveSosAlerts.value,
+          );
+          if (alerts.containsKey(id)) {
+            alerts.remove(id);
+            liveSosAlerts.value = alerts;
+          }
+        }
       }
     });
 
     _socket!.onDisconnect((_) {
       print('Disconnected from Real-Time SOS Socket');
     });
+  }
+
+  void setInitialAlerts(List<Map<String, dynamic>> alerts) {
+    final Map<String, Map<String, dynamic>> map = {};
+    for (var a in alerts) {
+      final id = a['id']?.toString();
+      if (id != null &&
+          a['status'] != 'resolved' &&
+          a['status'] != 'cancelled') {
+        map[id] = a;
+      }
+    }
+    liveSosAlerts.value = map;
   }
 
   void dispose() {

@@ -17,6 +17,7 @@ import '../coordinator/coordinator_operations_tab.dart';
 import '../coordinator/combined_sos_tab.dart';
 import '../home/home_tab.dart';
 import '../home/user_home_tab.dart';
+import '../home/global_sos_indicator.dart';
 import '../map/map_tab.dart';
 import '../missing/missing_tab.dart';
 import '../notifications/notifications_tab.dart';
@@ -324,7 +325,14 @@ class _GeneralAppShellState extends State<GeneralAppShell> {
   int _index = 0;
   final ValueNotifier<int> _refreshNotifier = ValueNotifier(0);
 
-  static const _titles = ['Dashboard', 'Map', 'Missing', 'Tasks', 'Profile'];
+  static const _titles = [
+    'Dashboard',
+    'Map',
+    'Missing',
+    'SOS',
+    'Tasks',
+    'Profile',
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -341,6 +349,11 @@ class _GeneralAppShellState extends State<GeneralAppShell> {
       MissingTab(
         key: ValueKey('missing_${_index}_${_refreshNotifier.value}'),
         api: widget.api,
+      ),
+      CombinedSosTab(
+        key: ValueKey('sos_${_index}_${_refreshNotifier.value}'),
+        api: widget.api,
+        user: widget.user,
       ),
       AssignmentsTab(
         key: ValueKey('asn_${_index}_${_refreshNotifier.value}'),
@@ -402,6 +415,11 @@ class _GeneralAppShellState extends State<GeneralAppShell> {
         duration: const Duration(milliseconds: 300),
         child: tabs[_index],
       ),
+      floatingActionButton: GlobalSosIndicator(
+        onTap: () {
+          setState(() => _index = 3); // Switch to SOS Tab
+        },
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (index) => setState(() => _index = index),
@@ -420,6 +438,11 @@ class _GeneralAppShellState extends State<GeneralAppShell> {
             icon: Icon(Icons.people_alt_outlined),
             selectedIcon: Icon(Icons.people_alt),
             label: 'Missing',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.sos_outlined),
+            selectedIcon: Icon(Icons.sos),
+            label: 'SOS',
           ),
           NavigationDestination(
             icon: Icon(Icons.assignment_outlined),
@@ -543,6 +566,11 @@ class _CoordinatorAppShellState extends State<CoordinatorAppShell> {
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 300),
         child: tabs[_index],
+      ),
+      floatingActionButton: GlobalSosIndicator(
+        onTap: () {
+          setState(() => _index = 3); // Switch to SOS Tab
+        },
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
