@@ -9,6 +9,8 @@ import '../../core/api_client.dart';
 import '../../core/app_config.dart';
 import '../../core/models.dart';
 import '../../theme/app_colors.dart';
+import '../../core/connectivity_service.dart';
+import '../../core/socket_service.dart';
 import '../assignments/assignments_tab.dart';
 import '../coordinator/coordinator_dashboard_tab.dart';
 import '../coordinator/coordinator_operations_tab.dart';
@@ -41,6 +43,13 @@ class _AuthGateState extends State<AuthGate> {
     super.initState();
     _api = ApiClient(baseUrl: AppConfig.baseUrl, tokenProvider: _tokenProvider);
     _bootstrap();
+  }
+
+  @override
+  void dispose() {
+    ConnectivityService.instance.dispose();
+    SocketService.instance.dispose();
+    super.dispose();
   }
 
   Future<String?> _tokenProvider() async {
@@ -79,6 +88,15 @@ class _AuthGateState extends State<AuthGate> {
       } catch (_) {}
 
       if (!mounted) return;
+
+      // Initialize background offline SOS sync
+      ConnectivityService.instance.initialize(_api);
+
+      // Initialize Real-time SOS alerts for coordinators and admins
+      SocketService.instance.initialize(
+        context,
+        user.isCoordinator || user.isAdmin,
+      );
 
       setState(() {
         _user = user;

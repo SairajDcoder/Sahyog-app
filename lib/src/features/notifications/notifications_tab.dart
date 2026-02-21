@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api_client.dart';
 import '../../core/models.dart';
 import '../../theme/app_colors.dart';
+import '../../core/socket_service.dart';
 
 class NotificationsTab extends StatefulWidget {
   const NotificationsTab({super.key, required this.api, required this.user});
@@ -28,11 +29,18 @@ class _NotificationsTabState extends State<NotificationsTab> {
     _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) _load(silent: true);
     });
+
+    SocketService.instance.onNewSosAlert.addListener(_onSocketAlert);
+  }
+
+  void _onSocketAlert() {
+    if (mounted) _load(silent: true);
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
+    SocketService.instance.onNewSosAlert.removeListener(_onSocketAlert);
     super.dispose();
   }
 
@@ -47,33 +55,41 @@ class _NotificationsTabState extends State<NotificationsTab> {
 
       final List<Map<String, dynamic>> derived = [];
 
-      if (widget.user.isCoordinator) {
-        final sosRaw = await widget.api.get('/api/v1/coordinator/sos');
+      if (widget.user.isCoordinator ||
+          widget.user.isAdmin ||
+          widget.user.isOrganization) {
+        final sosEndpoint = widget.user.isCoordinator
+            ? '/api/v1/coordinator/sos'
+            : '/api/v1/sos';
+        final sosRaw = await widget.api.get(sosEndpoint);
         final sosList = (sosRaw is List) ? sosRaw : [];
         for (var sos in sosList) {
           derived.add({
             'id': 'sos_${sos['id']}',
             'title': '🆘 Emergency Alert',
-            'body': 'SOS from ${sos['volunteer_name'] ?? 'Unknown'}',
+            'body':
+                'SOS from ${sos['volunteer_name'] ?? sos['reporter_name'] ?? 'Unknown'}',
             'type': 'sos',
             'time': sos['created_at'],
             'status': sos['status'],
           });
         }
 
-        final needsRaw = await widget.api.get('/api/v1/coordinator/needs');
-        final needsList = (needsRaw is List) ? needsRaw : [];
-        for (var need in needsList) {
-          if (need['status'] == 'unassigned') {
-            derived.add({
-              'id': 'need_${need['id']}',
-              'title': '📦 New Need Request',
-              'body':
-                  '${need['type']} request from ${need['reporter_name'] ?? 'Anonymous'}',
-              'type': 'need',
-              'time': need['created_at'],
-              'status': 'urgent',
-            });
+        if (widget.user.isCoordinator) {
+          final needsRaw = await widget.api.get('/api/v1/coordinator/needs');
+          final needsList = (needsRaw is List) ? needsRaw : [];
+          for (var need in needsList) {
+            if (need['status'] == 'unassigned') {
+              derived.add({
+                'id': 'need_${need['id']}',
+                'title': '📦 New Need Request',
+                'body':
+                    '${need['type']} request from ${need['reporter_name'] ?? 'Anonymous'}',
+                'type': 'need',
+                'time': need['created_at'],
+                'status': 'urgent',
+              });
+            }
           }
         }
       }

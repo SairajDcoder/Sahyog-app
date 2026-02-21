@@ -8,6 +8,8 @@ import '../../core/api_client.dart';
 import '../../core/location_service.dart';
 import '../../core/models.dart';
 import '../../theme/app_colors.dart';
+import '../../core/database_helper.dart';
+import '../../core/connectivity_service.dart';
 
 class UserHomeTab extends StatefulWidget {
   const UserHomeTab({super.key, required this.api, required this.user});
@@ -81,6 +83,31 @@ class _UserHomeTabState extends State<UserHomeTab>
   @override
   bool get wantKeepAlive => true;
 
+  Future<void> _triggerSOS() async {
+    // Save to local SQLite immediately
+    final incident = {
+      'reporter_id': widget.user.id,
+      'location_lat': _position?.latitude,
+      'location_lng': _position?.longitude,
+      'captured_at': DateTime.now().toIso8601String(),
+    };
+
+    await DatabaseHelper.instance.insertIncident(incident);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('SOS Activated! Saved locally.'),
+          backgroundColor: AppColors.criticalRed,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+
+    // Try background sync
+    await ConnectivityService.instance.syncOfflineIncidents();
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -92,6 +119,8 @@ class _UserHomeTabState extends State<UserHomeTab>
         padding: const EdgeInsets.all(16),
         children: [
           _UserStatusBanner(user: widget.user),
+          const SizedBox(height: 16),
+          _buildEmergencySOSButton(),
           const SizedBox(height: 16),
           Card(
             clipBehavior: Clip.antiAlias,
@@ -128,6 +157,53 @@ class _UserHomeTabState extends State<UserHomeTab>
             ),
           const SizedBox(height: 32),
         ],
+      ),
+    );
+  }
+
+  Widget _buildEmergencySOSButton() {
+    return InkWell(
+      onTap: _triggerSOS,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+        decoration: BoxDecoration(
+          color: AppColors.criticalRed,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.criticalRed.withOpacity(0.3),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.emergency, color: Colors.white, size: 36),
+            const SizedBox(width: 16),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text(
+                  'TRIGGER SOS',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 20,
+                    letterSpacing: 2,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'Tap to request immediate help',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
