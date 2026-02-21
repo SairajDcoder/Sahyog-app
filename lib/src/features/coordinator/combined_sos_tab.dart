@@ -3,19 +3,21 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
+import '../../core/models.dart';
 import '../../theme/app_colors.dart';
 import '../missing/missing_tab.dart';
 
-class CoordinatorSosTab extends StatefulWidget {
-  const CoordinatorSosTab({super.key, required this.api});
+class CombinedSosTab extends StatefulWidget {
+  const CombinedSosTab({super.key, required this.api, required this.user});
 
   final ApiClient api;
+  final AppUser user;
 
   @override
-  State<CoordinatorSosTab> createState() => _CoordinatorSosTabState();
+  State<CombinedSosTab> createState() => _CombinedSosTabState();
 }
 
-class _CoordinatorSosTabState extends State<CoordinatorSosTab> {
+class _CombinedSosTabState extends State<CombinedSosTab> {
   List<Map<String, dynamic>> _alerts = [];
   bool _loading = true;
   String _error = '';
@@ -45,7 +47,13 @@ class _CoordinatorSosTabState extends State<CoordinatorSosTab> {
         });
       }
 
-      final raw = await widget.api.get('/api/v1/coordinator/sos');
+      // If coordinator, use the dedicated coordinator endpoint.
+      // Else use the general SOS endpoint which honors user/volunteer visibility.
+      final endpoint = widget.user.isCoordinator
+          ? '/api/v1/coordinator/sos'
+          : '/api/v1/sos';
+
+      final raw = await widget.api.get(endpoint);
       final list = (raw is List)
           ? raw.cast<Map<String, dynamic>>()
           : <Map<String, dynamic>>[];
@@ -123,7 +131,7 @@ class _CoordinatorSosTabState extends State<CoordinatorSosTab> {
             ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 4),
-          const Text('Alerts within your assigned disaster zone.'),
+          const Text('SOS alerts within your area.'),
           const SizedBox(height: 10),
           if (_error.isNotEmpty)
             Text(_error, style: const TextStyle(color: AppColors.criticalRed)),
@@ -131,15 +139,18 @@ class _CoordinatorSosTabState extends State<CoordinatorSosTab> {
             const Card(
               child: Padding(
                 padding: EdgeInsets.all(14),
-                child: Text('No SOS alerts for your zone.'),
+                child: Text('No SOS alerts found.'),
               ),
             )
           else
             ..._alerts.map((alert) {
               final id = (alert['id'] ?? '').toString();
               final status = (alert['status'] ?? 'triggered').toString();
-              final volunteerName = (alert['volunteer_name'] ?? 'Unknown')
-                  .toString();
+              final reporterName =
+                  (alert['reporter_name'] ??
+                          alert['reporter_phone'] ??
+                          'Sahayanet User')
+                      .toString();
 
               return Card(
                 child: Padding(
@@ -167,7 +178,7 @@ class _CoordinatorSosTabState extends State<CoordinatorSosTab> {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      Text('Volunteer: $volunteerName'),
+                      Text('Reporter: $reporterName'),
                       if (alert['media_urls'] is List &&
                           (alert['media_urls'] as List).isNotEmpty)
                         const Padding(
@@ -175,23 +186,33 @@ class _CoordinatorSosTabState extends State<CoordinatorSosTab> {
                           child: Text('📎 Has media attachments'),
                         ),
                       const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        children: [
-                          OutlinedButton(
-                            onPressed: id.isEmpty
-                                ? null
-                                : () => _updateStatus(id, 'in_progress'),
-                            child: const Text('Acknowledge'),
+                      if (widget.user.isCoordinator)
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            OutlinedButton(
+                              onPressed: id.isEmpty
+                                  ? null
+                                  : () => _updateStatus(id, 'acknowledged'),
+                              child: const Text('Acknowledge'),
+                            ),
+                            FilledButton.tonal(
+                              onPressed: id.isEmpty
+                                  ? null
+                                  : () => _updateStatus(id, 'resolved'),
+                              child: const Text('Resolve'),
+                            ),
+                          ],
+                        )
+                      else if (status == 'triggered')
+                        OutlinedButton.icon(
+                          onPressed: () => _updateStatus(id, 'cancelled'),
+                          icon: const Icon(Icons.cancel, size: 18),
+                          label: const Text('Cancel Request'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red,
                           ),
-                          FilledButton.tonal(
-                            onPressed: id.isEmpty
-                                ? null
-                                : () => _updateStatus(id, 'resolved'),
-                            child: const Text('Resolve'),
-                          ),
-                        ],
-                      ),
+                        ),
                     ],
                   ),
                 ),

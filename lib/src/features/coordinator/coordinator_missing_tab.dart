@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 
 import 'package:flutter/material.dart';
 
@@ -17,7 +19,8 @@ class CoordinatorMissingTab extends StatefulWidget {
   State<CoordinatorMissingTab> createState() => _CoordinatorMissingTabState();
 }
 
-class _CoordinatorMissingTabState extends State<CoordinatorMissingTab> {
+class _CoordinatorMissingTabState extends State<CoordinatorMissingTab>
+    with AutomaticKeepAliveClientMixin {
   List<Map<String, dynamic>> _board = [];
   bool _loading = true;
   String _error = '';
@@ -29,7 +32,7 @@ class _CoordinatorMissingTabState extends State<CoordinatorMissingTab> {
   final _phoneCtrl = TextEditingController();
   final _nameCtrl = TextEditingController();
   final _ageCtrl = TextEditingController();
-  final _photoCtrl = TextEditingController();
+  XFile? _pickedPhoto;
   double? _lat;
   double? _lng;
   bool _submitting = false;
@@ -43,13 +46,17 @@ class _CoordinatorMissingTabState extends State<CoordinatorMissingTab> {
     });
   }
 
+  final _foundNoteCtrl = TextEditingController();
+  final _foundLocCtrl = TextEditingController();
+
   @override
   void dispose() {
     _pollTimer?.cancel();
     _phoneCtrl.dispose();
     _nameCtrl.dispose();
     _ageCtrl.dispose();
-    _photoCtrl.dispose();
+    _foundNoteCtrl.dispose();
+    _foundLocCtrl.dispose();
     super.dispose();
   }
 
@@ -82,19 +89,186 @@ class _CoordinatorMissingTabState extends State<CoordinatorMissingTab> {
   }
 
   Future<void> _markFound(String id) async {
-    try {
-      await widget.api.patch('/api/v1/coordinator/missing/$id/found');
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Marked as found.')));
-      await _loadBoard();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed: $e')));
-    }
+    String condition = 'found_safe';
+    XFile? pickedFile;
+    final picker = ImagePicker();
+
+    _foundNoteCtrl.clear();
+    _foundLocCtrl.clear();
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+                left: 24,
+                right: 24,
+                top: 32,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Close Missing Person Report',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Center(
+                      child: GestureDetector(
+                        onTap: () async {
+                          final file = await picker.pickImage(
+                            source: ImageSource.gallery,
+                            imageQuality: 70,
+                          );
+                          if (file != null) {
+                            setModalState(() => pickedFile = file);
+                          }
+                        },
+                        child: Container(
+                          width: 160,
+                          height: 160,
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.grey.withOpacity(0.3),
+                              width: 2,
+                            ),
+                          ),
+                          child: pickedFile == null
+                              ? Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.add_a_photo_outlined,
+                                      size: 40,
+                                      color: Colors.grey[400],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    const Text(
+                                      'Add Proof Image',
+                                      style: TextStyle(fontSize: 12),
+                                    ),
+                                  ],
+                                )
+                              : ClipRRect(
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: Image.file(
+                                    File(pickedFile!.path),
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    DropdownButtonFormField<String>(
+                      value: condition,
+                      decoration: const InputDecoration(
+                        labelText: 'Condition at Rescue',
+                        prefixIcon: Icon(Icons.health_and_safety_outlined),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'found_safe',
+                          child: Text('Found Safe & Healthy'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'needs_assistance',
+                          child: Text('Needs Medical Assistance'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'critical',
+                          child: Text('Critical Condition'),
+                        ),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) setModalState(() => condition = v);
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _foundLocCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'Rescue Location',
+                        prefixIcon: const Icon(Icons.location_on_outlined),
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.my_location),
+                          onPressed: () async {
+                            try {
+                              final p = await LocationService()
+                                  .getCurrentPosition();
+                              _foundLocCtrl.text =
+                                  '${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}';
+                            } catch (_) {}
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _foundNoteCtrl,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'Closure description',
+                        hintText: 'Add final details/notes for coordination...',
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () async {
+                          Navigator.pop(ctx);
+                          try {
+                            await widget.api.patch(
+                              '/api/v1/coordinator/missing/$id/found',
+                              body: {
+                                'description': _foundNoteCtrl.text.trim(),
+                                'condition': condition,
+                                'rescue_location': _foundLocCtrl.text.trim(),
+                                'rescue_photo': pickedFile?.path ?? '',
+                              },
+                            );
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Marked as found.')),
+                            );
+                            _loadBoard();
+                          } catch (e) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Failed: $e')),
+                              );
+                            }
+                          }
+                        },
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        child: const Text('Confirm Finding'),
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _useCurrentLocation(StateSetter setModalState) async {
@@ -125,14 +299,15 @@ class _CoordinatorMissingTabState extends State<CoordinatorMissingTab> {
     try {
       final body = <String, dynamic>{
         'reporter_phone': phone,
-        if (_nameCtrl.text.trim().isNotEmpty) 'name': _nameCtrl.text.trim(),
-        if (_ageCtrl.text.trim().isNotEmpty)
-          'age': int.tryParse(_ageCtrl.text.trim()),
-        if (_photoCtrl.text.trim().isNotEmpty)
-          'photo_url': _photoCtrl.text.trim(),
-        if (_lat != null && _lng != null)
-          'last_known_location': {'lat': _lat, 'lng': _lng},
+        'name': _nameCtrl.text.trim().isEmpty ? null : _nameCtrl.text.trim(),
+        'age': int.tryParse(_ageCtrl.text.trim()),
+        'photo_urls': _pickedPhoto == null ? [] : [_pickedPhoto!.path],
+        'description': 'Reported by Coordinator.',
       };
+
+      if (_lat != null && _lng != null) {
+        body['last_seen_location'] = {'lat': _lat, 'lng': _lng};
+      }
 
       await widget.api.post('/api/v1/missing', body: body);
 
@@ -144,7 +319,7 @@ class _CoordinatorMissingTabState extends State<CoordinatorMissingTab> {
       _phoneCtrl.clear();
       _nameCtrl.clear();
       _ageCtrl.clear();
-      _photoCtrl.clear();
+      _pickedPhoto = null;
       _lat = null;
       _lng = null;
 
@@ -198,11 +373,39 @@ class _CoordinatorMissingTabState extends State<CoordinatorMissingTab> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: _photoCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Photo URL',
-                        prefixIcon: Icon(Icons.photo_camera_back_outlined),
+                    Center(
+                      child: GestureDetector(
+                        onTap: () async {
+                          final picker = ImagePicker();
+                          final file = await picker.pickImage(
+                            source: ImageSource.gallery,
+                            imageQuality: 70,
+                          );
+                          if (file != null) {
+                            setModalState(() => _pickedPhoto = file);
+                          }
+                        },
+                        child: Container(
+                          width: 120,
+                          height: 120,
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.grey[300]!),
+                          ),
+                          child: _pickedPhoto == null
+                              ? const Icon(
+                                  Icons.add_a_photo,
+                                  color: Colors.grey,
+                                )
+                              : ClipRRect(
+                                  borderRadius: BorderRadius.circular(15),
+                                  child: Image.file(
+                                    File(_pickedPhoto!.path),
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -242,7 +445,11 @@ class _CoordinatorMissingTabState extends State<CoordinatorMissingTab> {
   }
 
   @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context);
     return Scaffold(
       floatingActionButton: FloatingActionButton(
         onPressed: _showReportDialog,

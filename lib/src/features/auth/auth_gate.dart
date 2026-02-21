@@ -12,11 +12,14 @@ import '../../theme/app_colors.dart';
 import '../assignments/assignments_tab.dart';
 import '../coordinator/coordinator_dashboard_tab.dart';
 import '../coordinator/coordinator_operations_tab.dart';
-import '../coordinator/coordinator_sos_tab.dart';
+import '../coordinator/combined_sos_tab.dart';
 import '../home/home_tab.dart';
+import '../home/user_home_tab.dart';
 import '../map/map_tab.dart';
 import '../missing/missing_tab.dart';
+import '../notifications/notifications_tab.dart';
 import '../profile/profile_tab.dart';
+import 'user_profile_completion_screen.dart';
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key, required this.authState});
@@ -76,6 +79,7 @@ class _AuthGateState extends State<AuthGate> {
       } catch (_) {}
 
       if (!mounted) return;
+
       setState(() {
         _user = user;
         _loading = false;
@@ -134,60 +138,80 @@ class _AuthGateState extends State<AuthGate> {
       );
     }
 
-    return RoleBasedAppShell(api: _api, user: _user!);
+    return RoleBasedAppShell(api: _api, user: _user!, onRefresh: _bootstrap);
   }
 }
 
 class RoleBasedAppShell extends StatelessWidget {
-  const RoleBasedAppShell({super.key, required this.api, required this.user});
+  const RoleBasedAppShell({
+    super.key,
+    required this.api,
+    required this.user,
+    required this.onRefresh,
+  });
 
   final ApiClient api;
   final AppUser user;
+  final VoidCallback onRefresh;
 
   @override
   Widget build(BuildContext context) {
     if (user.isCoordinator) {
       return CoordinatorAppShell(api: api, user: user);
     }
+    if (user.isUser) {
+      if ((user.phone?.isEmpty ?? true) ||
+          (user.bloodGroup?.isEmpty ?? true) ||
+          (user.address?.isEmpty ?? true)) {
+        return UserProfileCompletionScreen(
+          api: api,
+          user: user,
+          onCompleted: onRefresh,
+        );
+      }
+      return UserAppShell(api: api, user: user);
+    }
     return GeneralAppShell(api: api, user: user);
   }
 }
 
-class GeneralAppShell extends StatefulWidget {
-  const GeneralAppShell({super.key, required this.api, required this.user});
+class UserAppShell extends StatefulWidget {
+  const UserAppShell({super.key, required this.api, required this.user});
 
   final ApiClient api;
   final AppUser user;
 
   @override
-  State<GeneralAppShell> createState() => _GeneralAppShellState();
+  State<UserAppShell> createState() => _UserAppShellState();
 }
 
-class _GeneralAppShellState extends State<GeneralAppShell> {
+class _UserAppShellState extends State<UserAppShell> {
   int _index = 0;
+  final ValueNotifier<int> _refreshNotifier = ValueNotifier(0);
 
-  static const _titles = [
-    'Dashboard',
-    'Map',
-    'Missing',
-    'Assignments',
-    'Profile',
-  ];
-
-  void _showNotifications() {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('No new notifications.')));
-  }
+  static const _titles = ['Dashboard', 'Map', 'Missing', 'Profile'];
 
   @override
   Widget build(BuildContext context) {
     final tabs = [
-      HomeTab(api: widget.api, user: widget.user),
-      MapTab(api: widget.api),
-      MissingTab(api: widget.api),
-      AssignmentsTab(api: widget.api, user: widget.user),
-      ProfileTab(api: widget.api, user: widget.user),
+      UserHomeTab(
+        key: ValueKey('u_home_${_index}_${_refreshNotifier.value}'),
+        api: widget.api,
+        user: widget.user,
+      ),
+      MapTab(
+        key: ValueKey('u_map_${_index}_${_refreshNotifier.value}'),
+        api: widget.api,
+      ),
+      MissingTab(
+        key: ValueKey('u_missing_${_index}_${_refreshNotifier.value}'),
+        api: widget.api,
+      ),
+      ProfileTab(
+        key: ValueKey('u_prof_${_index}_${_refreshNotifier.value}'),
+        api: widget.api,
+        user: widget.user,
+      ),
     ];
 
     return Scaffold(
@@ -208,18 +232,158 @@ class _GeneralAppShellState extends State<GeneralAppShell> {
               _titles[_index],
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
+            const SizedBox(width: 8),
+            const _RoleChip(label: 'CITIZEN', color: Colors.orange),
           ],
         ),
         actions: [
-          IconButton(onPressed: () {}, icon: const Icon(Icons.search)),
+          _RefreshControl(
+            onRefresh: () {
+              setState(() => _refreshNotifier.value++);
+            },
+          ),
           IconButton(
-            onPressed: _showNotifications,
+            onPressed: () => Navigator.push(
+              context,
+              PageRouteBuilder(
+                pageBuilder: (ctx, anim, secondaryAnim) =>
+                    NotificationsTab(api: widget.api, user: widget.user),
+                transitionsBuilder: (ctx, anim, secondaryAnim, child) {
+                  return FadeTransition(opacity: anim, child: child);
+                },
+              ),
+            ),
             icon: const Icon(Icons.notifications_none),
           ),
           const SizedBox(width: 8),
         ],
       ),
-      body: IndexedStack(index: _index, children: tabs),
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 300),
+        child: tabs[_index],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _index,
+        onDestinationSelected: (index) => setState(() => _index = index),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.dashboard_outlined),
+            selectedIcon: Icon(Icons.dashboard),
+            label: 'Dashboard',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.map_outlined),
+            selectedIcon: Icon(Icons.map),
+            label: 'Map',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.people_alt_outlined),
+            selectedIcon: Icon(Icons.people_alt),
+            label: 'Missing',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person),
+            label: 'Profile',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class GeneralAppShell extends StatefulWidget {
+  const GeneralAppShell({super.key, required this.api, required this.user});
+
+  final ApiClient api;
+  final AppUser user;
+
+  @override
+  State<GeneralAppShell> createState() => _GeneralAppShellState();
+}
+
+class _GeneralAppShellState extends State<GeneralAppShell> {
+  int _index = 0;
+  final ValueNotifier<int> _refreshNotifier = ValueNotifier(0);
+
+  static const _titles = ['Dashboard', 'Map', 'Missing', 'Tasks', 'Profile'];
+
+  @override
+  Widget build(BuildContext context) {
+    final tabs = [
+      HomeTab(
+        key: ValueKey('home_${_index}_${_refreshNotifier.value}'),
+        api: widget.api,
+        user: widget.user,
+      ),
+      MapTab(
+        key: ValueKey('map_${_index}_${_refreshNotifier.value}'),
+        api: widget.api,
+      ),
+      MissingTab(
+        key: ValueKey('missing_${_index}_${_refreshNotifier.value}'),
+        api: widget.api,
+      ),
+      AssignmentsTab(
+        key: ValueKey('asn_${_index}_${_refreshNotifier.value}'),
+        api: widget.api,
+        user: widget.user,
+      ),
+      ProfileTab(
+        key: ValueKey('prof_${_index}_${_refreshNotifier.value}'),
+        api: widget.api,
+        user: widget.user,
+      ),
+    ];
+
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: 24,
+        title: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.asset(
+                'lib/assets/favicon.png',
+                width: 28,
+                height: 28,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              _titles[_index],
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(width: 8),
+            const _RoleChip(label: 'VOLUNTEER', color: AppColors.primaryGreen),
+          ],
+        ),
+        actions: [
+          _RefreshControl(
+            onRefresh: () {
+              setState(() => _refreshNotifier.value++);
+            },
+          ),
+          IconButton(
+            onPressed: () => Navigator.push(
+              context,
+              PageRouteBuilder(
+                pageBuilder: (ctx, anim, secondaryAnim) =>
+                    NotificationsTab(api: widget.api, user: widget.user),
+                transitionsBuilder: (ctx, anim, secondaryAnim, child) {
+                  return FadeTransition(opacity: anim, child: child);
+                },
+              ),
+            ),
+            icon: const Icon(Icons.notifications_none),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 300),
+        child: tabs[_index],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (index) => setState(() => _index = index),
@@ -242,7 +406,7 @@ class _GeneralAppShellState extends State<GeneralAppShell> {
           NavigationDestination(
             icon: Icon(Icons.assignment_outlined),
             selectedIcon: Icon(Icons.assignment),
-            label: 'Assignments',
+            label: 'Tasks',
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outline),
@@ -267,27 +431,51 @@ class CoordinatorAppShell extends StatefulWidget {
 
 class _CoordinatorAppShellState extends State<CoordinatorAppShell> {
   int _index = 0;
+  int _operationsTabIndex = 0;
+  final ValueNotifier<int> _refreshNotifier = ValueNotifier(0);
 
   static const _titles = ['Dashboard', 'Map', 'Operations', 'SOS', 'Profile'];
-
-  void _showNotifications() {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('No new notifications.')));
-  }
 
   @override
   Widget build(BuildContext context) {
     final tabs = [
       CoordinatorDashboardTab(
+        key: ValueKey('c_dash_${_refreshNotifier.value}'),
         api: widget.api,
         user: widget.user,
-        onNavigate: (index) => setState(() => _index = index),
+        onNavigate: (index) {
+          if (index >= 10) {
+            // sub-navigation to operations
+            setState(() {
+              _index = 2; // Operations tab
+              _operationsTabIndex = index - 10;
+            });
+          } else {
+            // Adjust index if navigating to something after the removed Alerts tab
+            // Original: 0:Dashboard, 1:Map, 2:Operations, 3:Alerts, 4:SOS, 5:Profile
+            // New: 0:Dashboard, 1:Map, 2:Operations, 3:SOS, 4:Profile
+            int targetIndex = index;
+            if (index > 3) targetIndex = index - 1;
+            setState(() => _index = targetIndex);
+          }
+        },
       ),
-      MapTab(api: widget.api),
-      CoordinatorOperationsTab(api: widget.api),
-      CoordinatorSosTab(api: widget.api),
-      ProfileTab(api: widget.api, user: widget.user),
+      MapTab(key: ValueKey('c_map_${_refreshNotifier.value}'), api: widget.api),
+      CoordinatorOperationsTab(
+        key: ValueKey('c_ops_${_operationsTabIndex}_${_refreshNotifier.value}'),
+        api: widget.api,
+        initialTabIndex: _operationsTabIndex,
+      ),
+      CombinedSosTab(
+        key: ValueKey('c_sos_${_refreshNotifier.value}'),
+        api: widget.api,
+        user: widget.user,
+      ),
+      ProfileTab(
+        key: ValueKey('c_prof_${_refreshNotifier.value}'),
+        api: widget.api,
+        user: widget.user,
+      ),
     ];
 
     return Scaffold(
@@ -308,18 +496,36 @@ class _CoordinatorAppShellState extends State<CoordinatorAppShell> {
               _titles[_index],
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
+            const SizedBox(width: 8),
+            const _RoleChip(label: 'COORDINATOR', color: AppColors.infoBlue),
           ],
         ),
         actions: [
-          IconButton(onPressed: () {}, icon: const Icon(Icons.search)),
+          _RefreshControl(
+            onRefresh: () {
+              setState(() => _refreshNotifier.value++);
+            },
+          ),
           IconButton(
-            onPressed: _showNotifications,
+            onPressed: () => Navigator.push(
+              context,
+              PageRouteBuilder(
+                pageBuilder: (ctx, anim, secondaryAnim) =>
+                    NotificationsTab(api: widget.api, user: widget.user),
+                transitionsBuilder: (ctx, anim, secondaryAnim, child) {
+                  return FadeTransition(opacity: anim, child: child);
+                },
+              ),
+            ),
             icon: const Icon(Icons.notifications_none),
           ),
           const SizedBox(width: 8),
         ],
       ),
-      body: IndexedStack(index: _index, children: tabs),
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 300),
+        child: tabs[_index],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (index) => setState(() => _index = index),
@@ -351,6 +557,75 @@ class _CoordinatorAppShellState extends State<CoordinatorAppShell> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _RoleChip extends StatelessWidget {
+  const _RoleChip({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 9,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+}
+
+class _RefreshControl extends StatefulWidget {
+  const _RefreshControl({required this.onRefresh});
+  final VoidCallback onRefresh;
+
+  @override
+  State<_RefreshControl> createState() => _RefreshControlState();
+}
+
+class _RefreshControlState extends State<_RefreshControl>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _handle() {
+    _ctrl.forward(from: 0);
+    widget.onRefresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _ctrl,
+      child: IconButton(onPressed: _handle, icon: const Icon(Icons.refresh)),
     );
   }
 }

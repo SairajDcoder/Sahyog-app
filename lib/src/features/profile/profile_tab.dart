@@ -22,37 +22,41 @@ class _ProfileTabState extends State<ProfileTab> {
   bool _trackingEnabled = false;
   bool _busy = false;
   bool _availability = true;
-
   Timer? _locationTimer;
 
-  @override
-  void initState() {
-    super.initState();
-    _availability = widget.user.isActive;
-    _locationTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (_trackingEnabled && mounted) {
-        _syncLocationOnce(silent: true);
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _locationTimer?.cancel();
-    super.dispose();
+  Future<void> _updateUserDetails() async {
+    try {
+      setState(() => _busy = true);
+      await widget.api.put(
+        '/api/users/me',
+        body: {
+          'blood_group': _bloodCtrl.text,
+          'medical_history': _medCtrl.text,
+          'address': _addrCtrl.text,
+        },
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile updated successfully')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Update failed: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _syncLocationOnce({bool silent = false}) async {
     try {
       if (!silent) setState(() => _busy = true);
-
       final location = await LocationService().getCurrentPosition();
-
       await widget.api.put(
         '/api/users/me/location',
         body: {'lat': location.latitude, 'lng': location.longitude},
       );
-
       if (!mounted) return;
       if (!silent) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -79,12 +83,10 @@ class _ProfileTabState extends State<ProfileTab> {
         body: {'is_active': value},
       );
       if (!mounted) return;
-
       final next = (raw is Map<String, dynamic> && raw['is_active'] is bool)
           ? raw['is_active'] as bool
           : value;
       setState(() => _availability = next);
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -110,6 +112,33 @@ class _ProfileTabState extends State<ProfileTab> {
     await auth.signOut();
   }
 
+  late TextEditingController _bloodCtrl;
+  late TextEditingController _medCtrl;
+  late TextEditingController _addrCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _availability = widget.user.isActive;
+    _bloodCtrl = TextEditingController(text: widget.user.bloodGroup);
+    _medCtrl = TextEditingController(text: widget.user.medicalHistory);
+    _addrCtrl = TextEditingController(text: widget.user.address);
+    _locationTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (_trackingEnabled && mounted) {
+        _syncLocationOnce(silent: true);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _bloodCtrl.dispose();
+    _medCtrl.dispose();
+    _addrCtrl.dispose();
+    _locationTimer?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -118,10 +147,10 @@ class _ProfileTabState extends State<ProfileTab> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // ... (ClerkAuthBuilder remains same)
         ClerkAuthBuilder(
           signedInBuilder: (context, authState) {
             final clerkUser = authState.user;
-
             final name = clerkUser?.name ?? widget.user.name;
             final email = clerkUser?.email ?? widget.user.email;
             final imageUrl = clerkUser?.imageUrl;
@@ -164,11 +193,14 @@ class _ProfileTabState extends State<ProfileTab> {
                     ),
                     const SizedBox(height: 12),
                     Chip(
-                      backgroundColor: AppColors.primaryGreen.withValues(
-                        alpha: 0.1,
-                      ),
+                      backgroundColor:
+                          (widget.user.isUser
+                                  ? Colors.orange
+                                  : AppColors.primaryGreen)
+                              .withValues(alpha: 0.1),
                       label: Text(
-                        widget.user.role.toUpperCase(),
+                        (widget.user.isUser ? 'CITIZEN' : widget.user.role)
+                            .toUpperCase(),
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                     ),
@@ -178,6 +210,62 @@ class _ProfileTabState extends State<ProfileTab> {
             );
           },
           signedOutBuilder: (_, __) => const SizedBox.shrink(),
+        ),
+
+        const SizedBox(height: 16),
+
+        // Health & Contact Card
+        Card(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Health & Contact',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: _busy ? null : _updateUserDetails,
+                      icon: const Icon(Icons.save, size: 18),
+                      label: const Text('Save'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _buildProfileField(
+                  label: 'Blood Group',
+                  controller: _bloodCtrl,
+                  icon: Icons.bloodtype,
+                  hint: 'e.g. O+',
+                ),
+                const SizedBox(height: 12),
+                _buildProfileField(
+                  label: 'Address',
+                  controller: _addrCtrl,
+                  icon: Icons.home,
+                  hint: 'Full physical address',
+                ),
+                const SizedBox(height: 12),
+                _buildProfileField(
+                  label: 'Medical History',
+                  controller: _medCtrl,
+                  icon: Icons.medical_services,
+                  hint: 'Allergies, chronic conditions...',
+                  maxLines: 3,
+                ),
+              ],
+            ),
+          ),
         ),
 
         const SizedBox(height: 16),
@@ -217,11 +305,7 @@ class _ProfileTabState extends State<ProfileTab> {
                 ),
                 if (_trackingEnabled)
                   Padding(
-                    padding: const EdgeInsets.only(
-                      left: 16,
-                      right: 16,
-                      bottom: 16,
-                    ),
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     child: SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
@@ -234,7 +318,7 @@ class _ProfileTabState extends State<ProfileTab> {
               ],
             ),
           )
-        else
+        else if (!widget.user.isUser)
           Card(
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
@@ -277,6 +361,39 @@ class _ProfileTabState extends State<ProfileTab> {
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),
             label: const Text('Sign Out'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProfileField({
+    required String label,
+    required TextEditingController controller,
+    required IconData icon,
+    String? hint,
+    int maxLines = 1,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            color: Colors.grey,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 4),
+        TextField(
+          controller: controller,
+          maxLines: maxLines,
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: hint,
+            prefixIcon: Icon(icon, size: 20),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
       ],

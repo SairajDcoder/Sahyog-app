@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 
 import '../../core/api_client.dart';
 import '../../core/location_service.dart';
@@ -14,12 +16,13 @@ class MissingTab extends StatefulWidget {
   State<MissingTab> createState() => _MissingTabState();
 }
 
-class _MissingTabState extends State<MissingTab> {
+class _MissingTabState extends State<MissingTab>
+    with AutomaticKeepAliveClientMixin {
   final _nameCtrl = TextEditingController();
   final _ageCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
-  final _photoCtrl = TextEditingController();
+  XFile? _pickedReportPhoto;
   final _locService = LocationService();
 
   List<dynamic> _board = [];
@@ -46,7 +49,8 @@ class _MissingTabState extends State<MissingTab> {
     _ageCtrl.dispose();
     _descCtrl.dispose();
     _phoneCtrl.dispose();
-    _photoCtrl.dispose();
+    _closeNoteCtrl.dispose();
+    _closeLocCtrl.dispose();
     super.dispose();
   }
 
@@ -91,9 +95,11 @@ class _MissingTabState extends State<MissingTab> {
         'description': _descCtrl.text.trim().isEmpty
             ? null
             : _descCtrl.text.trim(),
-        'photo_urls': _photoCtrl.text.trim().isEmpty
+        'photo_urls': _pickedReportPhoto == null
             ? []
-            : [_photoCtrl.text.trim()],
+            : [
+                _pickedReportPhoto!.path,
+              ], // Mocking upload by sending path for now
       };
 
       if (_lat != null && _lng != null) {
@@ -110,7 +116,7 @@ class _MissingTabState extends State<MissingTab> {
       _nameCtrl.clear();
       _ageCtrl.clear();
       _descCtrl.clear();
-      _photoCtrl.clear();
+      _pickedReportPhoto = null;
       _lat = null;
       _lng = null;
 
@@ -125,50 +131,199 @@ class _MissingTabState extends State<MissingTab> {
     }
   }
 
+  // Use a class member for the found modal controllers to ensure safe disposal
+  final _closeNoteCtrl = TextEditingController();
+  final _closeLocCtrl = TextEditingController();
+
   Future<void> _markFound(String missingId) async {
-    final noteCtrl = TextEditingController();
-    final note = await showDialog<String>(
+    String condition = 'found_safe';
+    XFile? pickedFile;
+    final picker = ImagePicker();
+
+    _closeNoteCtrl.clear();
+    _closeLocCtrl.clear();
+
+    await showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Close Missing Report'),
-        content: TextField(
-          controller: noteCtrl,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            labelText: 'Closure description',
-            hintText: 'Add found details...',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, noteCtrl.text.trim()),
-            child: const Text('Mark Found'),
-          ),
-        ],
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
       ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            final theme = Theme.of(ctx);
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+                left: 24,
+                right: 24,
+                top: 32,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Close Missing Report',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    // Square Image Upload Area
+                    Center(
+                      child: GestureDetector(
+                        onTap: () async {
+                          final file = await picker.pickImage(
+                            source: ImageSource.gallery,
+                            imageQuality: 70,
+                          );
+                          if (file != null) {
+                            setModalState(() => pickedFile = file);
+                          }
+                        },
+                        child: Container(
+                          width: 160,
+                          height: 160,
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.grey.withOpacity(0.3),
+                              width: 2,
+                            ),
+                          ),
+                          child: pickedFile == null
+                              ? Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.add_a_photo_outlined,
+                                      size: 40,
+                                      color: Colors.grey[400],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Add Proof Image',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey[500],
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : ClipRRect(
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: Image.file(
+                                    File(pickedFile!.path),
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    DropdownButtonFormField<String>(
+                      value: condition,
+                      decoration: const InputDecoration(
+                        labelText: 'Condition',
+                        prefixIcon: Icon(Icons.health_and_safety_outlined),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'found_safe',
+                          child: Text('Found Safe & Healthy'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'needs_assistance',
+                          child: Text('Needs Medical Assistance'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'critical',
+                          child: Text('Critical Condition'),
+                        ),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) setModalState(() => condition = v);
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _closeLocCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'Found Location',
+                        prefixIcon: const Icon(Icons.location_on_outlined),
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.my_location),
+                          onPressed: () async {
+                            try {
+                              final p = await _locService.getCurrentPosition();
+                              _closeLocCtrl.text =
+                                  '${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}';
+                            } catch (_) {}
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _closeNoteCtrl,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'Closure description',
+                        hintText: 'Describe the outcome or next steps...',
+                        alignLabelWithHint: true,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () async {
+                          Navigator.pop(ctx);
+                          try {
+                            await widget.api.patch(
+                              '/api/v1/missing/$missingId/found',
+                              body: {
+                                'description': _closeNoteCtrl.text.trim(),
+                                'condition': condition,
+                                'found_location_desc': _closeLocCtrl.text
+                                    .trim(),
+                                'closure_photo': pickedFile?.path ?? '',
+                              },
+                            );
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Record closed successfully.'),
+                              ),
+                            );
+                            await _loadBoard();
+                          } catch (e) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Close failed: $e')),
+                              );
+                            }
+                          }
+                        },
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        child: const Text('Confirm & Close Report'),
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
-    noteCtrl.dispose();
-    if (note == null) return;
-    try {
-      await widget.api.patch(
-        '/api/v1/missing/$missingId/found',
-        body: {'description': note},
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Missing report closed as found.')),
-      );
-      await _loadBoard();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Close failed: $e')));
-    }
   }
 
   void _showReportForm() {
@@ -236,11 +391,56 @@ class _MissingTabState extends State<MissingTab> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: _photoCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Photo URL (Optional)',
-                        prefixIcon: Icon(Icons.photo_camera_back_outlined),
+                    Center(
+                      child: GestureDetector(
+                        onTap: () async {
+                          final picker = ImagePicker();
+                          final file = await picker.pickImage(
+                            source: ImageSource.gallery,
+                            imageQuality: 70,
+                          );
+                          if (file != null) {
+                            setSheetState(() => _pickedReportPhoto = file);
+                          }
+                        },
+                        child: Container(
+                          width: 140,
+                          height: 140,
+                          decoration: BoxDecoration(
+                            color: Colors.grey[500]!.withOpacity(0.05),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: Colors.grey.withOpacity(0.2),
+                              width: 2,
+                            ),
+                          ),
+                          child: _pickedReportPhoto == null
+                              ? Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.add_a_photo,
+                                      size: 40,
+                                      color: Colors.grey[400],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    const Text(
+                                      'Add Photo',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : ClipRRect(
+                                  borderRadius: BorderRadius.circular(18),
+                                  child: Image.file(
+                                    File(_pickedReportPhoto!.path),
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -307,7 +507,11 @@ class _MissingTabState extends State<MissingTab> {
   }
 
   @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context);
     return Scaffold(
       body: RefreshIndicator(
         onRefresh: _loadBoard,

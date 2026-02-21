@@ -20,7 +20,7 @@ class HomeTab extends StatefulWidget {
   State<HomeTab> createState() => _HomeTabState();
 }
 
-class _HomeTabState extends State<HomeTab> {
+class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
   final _locationService = LocationService();
   final MapController _miniMapController = MapController();
 
@@ -127,7 +127,11 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context);
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }

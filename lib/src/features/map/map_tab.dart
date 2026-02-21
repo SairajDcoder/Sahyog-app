@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -18,38 +19,51 @@ class MapTab extends StatefulWidget {
   State<MapTab> createState() => _MapTabState();
 }
 
-class _MapTabState extends State<MapTab> {
+class _MapTabState extends State<MapTab> with AutomaticKeepAliveClientMixin {
   final _locationService = LocationService();
   final MapController _mapController = MapController();
 
-  LatLng _center = const LatLng(18.5204, 73.8567); // Pune default
+  LatLng _center = const LatLng(18.5204, 73.8567); // Pune default fallback
+  LatLng? _userLocation;
   List<_ZoneCircle> _zones = [];
   final List<_ZoneCircle> _userMarkedZones = [];
   List<_ResourceMarker> _resources = [];
   bool _loading = true;
   String _error = '';
+  Timer? _pollTimer;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (mounted) _load(silent: true);
+    });
   }
 
-  Future<void> _load() async {
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load({bool silent = false}) async {
     try {
-      setState(() {
-        _loading = true;
-        _error = '';
-      });
+      if (!silent) {
+        setState(() {
+          _loading = true;
+          _error = '';
+        });
+      }
 
       try {
-        // We still fetch position for the "My Location" marker, but we don't move the map center automatically
-        // to avoid jumping to San Francisco (emulator default) on app open.
+        // Just fetch but don't force move the map center here
         final pos = await _locationService.getCurrentPosition().timeout(
-          const Duration(seconds: 3),
+          const Duration(seconds: 4),
         );
-        if (mounted)
-          setState(() => _center = LatLng(pos.latitude, pos.longitude));
+        if (mounted) {
+          setState(() => _userLocation = LatLng(pos.latitude, pos.longitude));
+        }
       } catch (_) {}
 
       // Fetch zones, resources, and sos
@@ -119,7 +133,8 @@ class _MapTabState extends State<MapTab> {
       final sosAlerts = sosRaw is List ? sosRaw : <dynamic>[];
       for (final item in sosAlerts) {
         final s = item as Map<String, dynamic>;
-        final parsed = _parsePoint(s['location']);
+        // Try parsing the item itself (for lat/lng top-level) or its location field
+        final parsed = _parsePoint(s) ?? _parsePoint(s['location']);
         if (parsed == null) continue;
         markers.add(
           _ResourceMarker(
@@ -179,7 +194,11 @@ class _MapTabState extends State<MapTab> {
   }
 
   @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context);
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -231,6 +250,41 @@ class _MapTabState extends State<MapTab> {
                             'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                         userAgentPackageName: 'com.example.sahyog_app',
                       ),
+                      // User Location Marker - Only show if we have successfully located
+                      if (_userLocation != null)
+                        MarkerLayer(
+                          markers: [
+                            Marker(
+                              point: _userLocation!,
+                              width: 60,
+                              height: 60,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Container(
+                                    width: 42,
+                                    height: 42,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      shape: BoxShape.circle,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.15),
+                                          blurRadius: 10,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(
+                                    Icons.gps_fixed,
+                                    color: AppColors.primaryGreen,
+                                    size: 26,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       CircleLayer(
                         circles: _zones
                             .map(
@@ -326,14 +380,41 @@ class _MapTabState extends State<MapTab> {
                             try {
                               final pos = await _locationService
                                   .getCurrentPosition()
-                                  .timeout(const Duration(seconds: 5));
+                                  .timeout(const Duration(seconds: 10));
                               final ll = LatLng(pos.latitude, pos.longitude);
-                              _mapController.move(ll, 15);
+                              if (mounted) {
+                                setState(() {
+                                  _userLocation = ll;
+                                });
+
+                                // Detect San Francisco emulator default
+                                final isEmulatorSF =
+                                    (ll.latitude > 37.42 &&
+                                        ll.latitude < 37.43) &&
+                                    (ll.longitude > -122.09 &&
+                                        ll.longitude < -122.08);
+
+                                if (isEmulatorSF && _zones.isNotEmpty) {
+                                  _mapController.move(_zones.first.center, 15);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Emulator detected. Staying in Pune.',
+                                      ),
+                                      duration: Duration(seconds: 2),
+                                    ),
+                                  );
+                                } else {
+                                  _mapController.move(ll, 16);
+                                }
+                              }
                             } catch (e) {
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    content: Text('Location unavailable: $e'),
+                                    content: Text(
+                                      'Could not locate device: $e',
+                                    ),
                                   ),
                                 );
                               }
@@ -341,7 +422,7 @@ class _MapTabState extends State<MapTab> {
                           },
                           backgroundColor: Colors.white,
                           foregroundColor: AppColors.primaryGreen,
-                          child: const Icon(Icons.my_location),
+                          child: const Icon(Icons.gps_fixed),
                         ),
                         const SizedBox(height: 8),
                         FloatingActionButton(
@@ -503,44 +584,60 @@ class _SosMarkerState extends State<_SosMarker>
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
+        final t = _controller.value;
         return Stack(
           alignment: Alignment.center,
           children: [
-            // Outer Ring
-            Container(
-              width: 50 * _controller.value,
-              height: 50 * _controller.value,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.criticalRed.withValues(
-                  alpha: (1.0 - _controller.value) * 0.4,
-                ),
-                border: Border.all(
-                  color: AppColors.criticalRed.withValues(
-                    alpha: (1.0 - _controller.value) * 0.6,
-                  ),
-                  width: 1,
+            // Wave 1
+            Opacity(
+              opacity: (1.0 - t).clamp(0.0, 1.0),
+              child: Container(
+                width: 70 * t,
+                height: 70 * t,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.criticalRed, width: 1.5),
                 ),
               ),
             ),
-            // Middle Ring
-            Container(
-              width: 30 * _controller.value,
-              height: 30 * _controller.value,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.criticalRed.withValues(
-                  alpha: (1.0 - _controller.value) * 0.3,
+            // Wave 2
+            Opacity(
+              opacity: (1.0 - ((t + 0.33) % 1.0)).clamp(0.0, 1.0),
+              child: Container(
+                width: 70 * ((t + 0.33) % 1.0),
+                height: 70 * ((t + 0.33) % 1.0),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.criticalRed, width: 1.0),
                 ),
               ),
             ),
-            // Solid Center Dot
+            // Wave 3
+            Opacity(
+              opacity: (1.0 - ((t + 0.66) % 1.0)).clamp(0.0, 1.0),
+              child: Container(
+                width: 70 * ((t + 0.66) % 1.0),
+                height: 70 * ((t + 0.66) % 1.0),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.criticalRed, width: 0.5),
+                ),
+              ),
+            ),
+            // Pulse inner
             Container(
-              width: 12,
-              height: 12,
-              decoration: const BoxDecoration(
+              width: 14,
+              height: 14,
+              decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: AppColors.criticalRed,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.criticalRed.withOpacity(0.8),
+                    blurRadius: 8,
+                    spreadRadius: 2,
+                  ),
+                ],
               ),
             ),
           ],

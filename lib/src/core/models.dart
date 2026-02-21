@@ -6,6 +6,10 @@ class AppUser {
     required this.role,
     this.organizationId,
     this.isActive = true,
+    this.bloodGroup,
+    this.medicalHistory,
+    this.address,
+    this.phone,
   });
 
   final String id;
@@ -14,6 +18,10 @@ class AppUser {
   final String role;
   final String? organizationId;
   final bool isActive;
+  final String? bloodGroup;
+  final String? medicalHistory;
+  final String? address;
+  final String? phone;
 
   AppUser copyWith({
     String? id,
@@ -22,6 +30,10 @@ class AppUser {
     String? role,
     String? organizationId,
     bool? isActive,
+    String? bloodGroup,
+    String? medicalHistory,
+    String? address,
+    String? phone,
   }) {
     return AppUser(
       id: id ?? this.id,
@@ -30,6 +42,10 @@ class AppUser {
       role: role ?? this.role,
       organizationId: organizationId ?? this.organizationId,
       isActive: isActive ?? this.isActive,
+      bloodGroup: bloodGroup ?? this.bloodGroup,
+      medicalHistory: medicalHistory ?? this.medicalHistory,
+      address: address ?? this.address,
+      phone: phone ?? this.phone,
     );
   }
 
@@ -37,6 +53,7 @@ class AppUser {
   bool get isCoordinator => role == 'coordinator';
   bool get isAdmin => role == 'admin';
   bool get isOrganization => role == 'organization';
+  bool get isUser => role == 'user';
 
   factory AppUser.fromSync(Map<String, dynamic> json) {
     return AppUser(
@@ -46,6 +63,10 @@ class AppUser {
       role: normalizeRole((json['role'] ?? 'volunteer').toString()),
       organizationId: json['organization_id']?.toString(),
       isActive: json['is_active'] is bool ? json['is_active'] as bool : true,
+      bloodGroup: json['blood_group']?.toString(),
+      medicalHistory: json['medical_history']?.toString(),
+      address: json['address']?.toString(),
+      phone: json['phone']?.toString(),
     );
   }
 
@@ -57,6 +78,10 @@ class AppUser {
       role: normalizeRole((json['role'] ?? 'volunteer').toString()),
       organizationId: json['organization_id']?.toString(),
       isActive: json['is_active'] is bool ? json['is_active'] as bool : true,
+      bloodGroup: json['blood_group']?.toString(),
+      medicalHistory: json['medical_history']?.toString(),
+      address: json['address']?.toString(),
+      phone: json['phone']?.toString(),
     );
   }
 }
@@ -73,9 +98,11 @@ String normalizeRole(String rawRole) {
     'org:coordinator': 'coordinator',
     'org:admin': 'admin',
     'org:organization': 'organization',
+    'user': 'user',
   };
 
-  return roleMap[rawRole] ?? 'volunteer';
+  return roleMap[rawRole] ??
+      'user'; // Default to user if unknown for safety? Actually volunteer is safer for legacy, but let's stick to map.
 }
 
 double? parseLat(dynamic value) {

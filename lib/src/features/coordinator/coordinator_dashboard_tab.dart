@@ -228,24 +228,29 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
     final stats = (_ctx['stats'] is Map<String, dynamic>)
         ? _ctx['stats'] as Map<String, dynamic>
         : {};
-    final tasks = (stats['tasks'] is Map<String, dynamic>)
-        ? stats['tasks'] as Map<String, dynamic>
-        : {};
-    final needs = (stats['needs'] is Map<String, dynamic>)
-        ? stats['needs'] as Map<String, dynamic>
-        : {};
-
     final items = [
       (
         'Volunteers',
         stats['volunteers'] ?? 0,
         Icons.people_alt,
         AppColors.primaryGreen,
-        1,
+        10,
       ),
-      ('Tasks', tasks['total'] ?? 0, Icons.assignment, Colors.blueAccent, 2),
-      ('Needs', needs['total'] ?? 0, Icons.report_problem, Colors.orange, 3),
-      ('SOS', stats['active_sos'] ?? 0, Icons.sos, AppColors.criticalRed, 4),
+      (
+        'Tasks',
+        _recentTasks.length, // Or use a total count from stats if available
+        Icons.assignment,
+        Colors.blueAccent,
+        11,
+      ),
+      (
+        'Needs',
+        stats['active_needs'] ?? 0,
+        Icons.report_problem,
+        Colors.orange,
+        12,
+      ),
+      ('SOS', _recentSos.length, Icons.sos, AppColors.criticalRed, 3),
     ];
 
     return SingleChildScrollView(
