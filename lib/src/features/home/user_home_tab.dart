@@ -31,6 +31,10 @@ class _UserHomeTabState extends State<UserHomeTab>
   List<Map<String, dynamic>> _alerts = [];
   Timer? _pollTimer;
 
+  Timer? _sosHoldTimer;
+  int _sosHoldTicks = 0;
+  bool _sosFired = false;
+
   @override
   void initState() {
     super.initState();
@@ -43,6 +47,7 @@ class _UserHomeTabState extends State<UserHomeTab>
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _sosHoldTimer?.cancel();
     super.dispose();
   }
 
@@ -120,8 +125,6 @@ class _UserHomeTabState extends State<UserHomeTab>
         children: [
           _UserStatusBanner(user: widget.user),
           const SizedBox(height: 16),
-          _buildEmergencySOSButton(),
-          const SizedBox(height: 16),
           Card(
             clipBehavior: Clip.antiAlias,
             elevation: 2,
@@ -130,6 +133,8 @@ class _UserHomeTabState extends State<UserHomeTab>
             ),
             child: SizedBox(height: 220, child: _buildMiniMap()),
           ),
+          const SizedBox(height: 16),
+          _buildEmergencySOSButton(),
           const SizedBox(height: 24),
           Row(
             children: [
@@ -162,43 +167,99 @@ class _UserHomeTabState extends State<UserHomeTab>
   }
 
   Widget _buildEmergencySOSButton() {
-    return InkWell(
-      onTap: _triggerSOS,
-      borderRadius: BorderRadius.circular(16),
+    final double progress = (_sosHoldTicks / 50.0).clamp(
+      0.0,
+      1.0,
+    ); // 5 sec = 50 ticks of 100ms
+
+    return GestureDetector(
+      onTapDown: (_) {
+        if (_sosFired) return;
+        _sosHoldTicks = 0;
+        _sosHoldTimer = Timer.periodic(const Duration(milliseconds: 100), (
+          timer,
+        ) {
+          setState(() {
+            _sosHoldTicks++;
+            if (_sosHoldTicks >= 50) {
+              _sosHoldTimer?.cancel();
+              _sosFired = true;
+              _triggerSOS();
+            }
+          });
+        });
+      },
+      onTapUp: (_) => _cancelHold(),
+      onTapCancel: () => _cancelHold(),
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
         decoration: BoxDecoration(
-          color: AppColors.criticalRed,
+          color: _sosFired ? AppColors.criticalRed : Colors.white,
           borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.criticalRed, width: 2),
           boxShadow: [
-            BoxShadow(
-              color: AppColors.criticalRed.withOpacity(0.3),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
+            if (_sosHoldTicks > 0)
+              BoxShadow(
+                color: AppColors.criticalRed.withOpacity(0.3),
+                blurRadius: 10,
+                spreadRadius: progress * 5,
+              ),
           ],
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        child: Stack(
+          alignment: Alignment.center,
           children: [
-            const Icon(Icons.emergency, color: Colors.white, size: 36),
-            const SizedBox(width: 16),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Text(
-                  'TRIGGER SOS',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 20,
-                    letterSpacing: 2,
+            // Background fill bar for holding
+            if (!_sosFired && _sosHoldTicks > 0)
+              Positioned.fill(
+                child: FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: progress,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.criticalRed.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
                   ),
                 ),
-                SizedBox(height: 4),
-                Text(
-                  'Tap to request immediate help',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.emergency,
+                  color: _sosFired ? Colors.white : AppColors.criticalRed,
+                  size: 36,
+                ),
+                const SizedBox(width: 16),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _sosFired ? 'SOS TRIGGERED' : 'HOLD FOR SOS',
+                      style: TextStyle(
+                        color: _sosFired ? Colors.white : AppColors.criticalRed,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _sosFired
+                          ? 'Help request dispatched'
+                          : (_sosHoldTicks > 0)
+                          ? 'Holding... ${(5.0 - (_sosHoldTicks / 10)).toStringAsFixed(1)}s'
+                          : 'Hold for 5 seconds to request help',
+                      style: TextStyle(
+                        color: _sosFired ? Colors.white : Colors.black54,
+                        fontSize: 12,
+                        fontWeight: _sosHoldTicks > 0
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -206,6 +267,14 @@ class _UserHomeTabState extends State<UserHomeTab>
         ),
       ),
     );
+  }
+
+  void _cancelHold() {
+    if (_sosFired) return;
+    _sosHoldTimer?.cancel();
+    setState(() {
+      _sosHoldTicks = 0;
+    });
   }
 
   Widget _buildMiniMap() {
