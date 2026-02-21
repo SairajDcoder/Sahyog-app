@@ -8,8 +8,10 @@ import '../../core/models.dart';
 import '../../theme/app_colors.dart';
 import '../assignments/assignments_tab.dart';
 import '../coordinator/coordinator_dashboard_tab.dart';
-import '../coordinator/coordinator_missing_tab.dart';
-import '../coordinator/coordinator_operations_tab.dart';
+import '../coordinator/coordinator_needs_tab.dart';
+import '../coordinator/coordinator_sos_tab.dart';
+import '../coordinator/coordinator_tasks_tab.dart';
+import '../coordinator/coordinator_volunteers_tab.dart';
 import '../home/home_tab.dart';
 import '../map/map_tab.dart';
 import '../missing/missing_tab.dart';
@@ -254,9 +256,10 @@ class _CoordinatorAppShellState extends State<CoordinatorAppShell> {
 
   static const _titles = [
     'Dashboard',
-    'Map',
-    'Operations',
-    'Missing',
+    'Volunteers',
+    'Tasks',
+    'Needs',
+    'SOS',
     'Profile',
   ];
 
@@ -269,10 +272,15 @@ class _CoordinatorAppShellState extends State<CoordinatorAppShell> {
   @override
   Widget build(BuildContext context) {
     final tabs = [
-      CoordinatorDashboardTab(api: widget.api, user: widget.user),
-      MapTab(api: widget.api),
-      CoordinatorOperationsTab(api: widget.api),
-      CoordinatorMissingTab(api: widget.api),
+      CoordinatorDashboardTab(
+        api: widget.api,
+        user: widget.user,
+        onNavigate: (index) => setState(() => _index = index),
+      ),
+      CoordinatorVolunteersTab(api: widget.api),
+      CoordinatorTasksTab(api: widget.api),
+      CoordinatorNeedsTab(api: widget.api),
+      CoordinatorSosTab(api: widget.api),
       ProfileTab(api: widget.api, user: widget.user),
     ];
 
@@ -323,19 +331,24 @@ class _CoordinatorAppShellState extends State<CoordinatorAppShell> {
             label: 'Dashboard',
           ),
           NavigationDestination(
-            icon: Icon(Icons.map_outlined),
-            selectedIcon: Icon(Icons.map),
-            label: 'Map',
+            icon: Icon(Icons.people_outline),
+            selectedIcon: Icon(Icons.people),
+            label: 'Volunteers',
           ),
           NavigationDestination(
-            icon: Icon(Icons.work_outline),
-            selectedIcon: Icon(Icons.work),
-            label: 'Operations',
+            icon: Icon(Icons.assignment_outlined),
+            selectedIcon: Icon(Icons.assignment),
+            label: 'Tasks',
           ),
           NavigationDestination(
-            icon: Icon(Icons.person_search_outlined),
-            selectedIcon: Icon(Icons.person_search),
-            label: 'Missing',
+            icon: Icon(Icons.report_problem_outlined),
+            selectedIcon: Icon(Icons.report_problem),
+            label: 'Needs',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.sos_outlined),
+            selectedIcon: Icon(Icons.sos),
+            label: 'SOS',
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outline),

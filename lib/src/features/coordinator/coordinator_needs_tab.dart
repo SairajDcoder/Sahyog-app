@@ -45,7 +45,7 @@ class _CoordinatorNeedsTabState extends State<CoordinatorNeedsTab> {
         });
       }
 
-      final raw = await widget.api.get('/api/v1/needs');
+      final raw = await widget.api.get('/api/v1/coordinator/needs');
       final list = (raw is List)
           ? raw.cast<Map<String, dynamic>>()
           : <Map<String, dynamic>>[];

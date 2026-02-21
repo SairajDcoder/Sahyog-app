@@ -25,6 +25,7 @@ class _CoordinatorTasksTabState extends State<CoordinatorTasksTab> {
   final _lngCtrl = TextEditingController();
 
   List<Map<String, dynamic>> _tasks = [];
+  List<Map<String, dynamic>> _history = [];
   bool _loading = true;
   bool _creating = false;
   String _error = '';
@@ -62,14 +63,19 @@ class _CoordinatorTasksTabState extends State<CoordinatorTasksTab> {
         });
       }
 
-      final raw = await widget.api.get('/api/v1/tasks/pending');
-      final list = (raw is List)
-          ? raw.cast<Map<String, dynamic>>()
+      final pendingRaw = await widget.api.get('/api/v1/coordinator/tasks');
+      final historyRaw = await widget.api.get('/api/v1/tasks/history');
+      final list = (pendingRaw is List)
+          ? pendingRaw.cast<Map<String, dynamic>>()
+          : <Map<String, dynamic>>[];
+      final history = (historyRaw is List)
+          ? historyRaw.cast<Map<String, dynamic>>()
           : <Map<String, dynamic>>[];
 
       if (!mounted) return;
       setState(() {
         _tasks = list;
+        _history = history;
         _loading = false;
       });
     } catch (e) {
@@ -99,26 +105,53 @@ class _CoordinatorTasksTabState extends State<CoordinatorTasksTab> {
         meetingPoint = {'lat': lat, 'lng': lng};
       }
 
-      await widget.api.post(
-        '/api/v1/tasks',
-        body: {
-          'disaster_id': _disasterCtrl.text.trim().isEmpty
-              ? null
-              : _disasterCtrl.text.trim(),
-          'zone_id': _zoneCtrl.text.trim().isEmpty
-              ? null
-              : _zoneCtrl.text.trim(),
-          'volunteer_id': _volunteerCtrl.text.trim().isEmpty
-              ? null
-              : _volunteerCtrl.text.trim(),
-          'type': _typeCtrl.text.trim(),
-          'title': _titleCtrl.text.trim(),
-          'description': _descCtrl.text.trim().isEmpty
-              ? null
-              : _descCtrl.text.trim(),
-          'meeting_point': meetingPoint,
-        },
-      );
+      final volunteerIds = _volunteerCtrl.text
+          .split(',')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+
+      if (volunteerIds.isEmpty) {
+        await widget.api.post(
+          '/api/v1/tasks',
+          body: {
+            'disaster_id': _disasterCtrl.text.trim().isEmpty
+                ? null
+                : _disasterCtrl.text.trim(),
+            'zone_id': _zoneCtrl.text.trim().isEmpty
+                ? null
+                : _zoneCtrl.text.trim(),
+            'volunteer_id': null,
+            'type': _typeCtrl.text.trim(),
+            'title': _titleCtrl.text.trim(),
+            'description': _descCtrl.text.trim().isEmpty
+                ? null
+                : _descCtrl.text.trim(),
+            'meeting_point': meetingPoint,
+          },
+        );
+      } else {
+        for (final volunteerId in volunteerIds) {
+          await widget.api.post(
+            '/api/v1/tasks',
+            body: {
+              'disaster_id': _disasterCtrl.text.trim().isEmpty
+                  ? null
+                  : _disasterCtrl.text.trim(),
+              'zone_id': _zoneCtrl.text.trim().isEmpty
+                  ? null
+                  : _zoneCtrl.text.trim(),
+              'volunteer_id': volunteerId,
+              'type': _typeCtrl.text.trim(),
+              'title': _titleCtrl.text.trim(),
+              'description': _descCtrl.text.trim().isEmpty
+                  ? null
+                  : _descCtrl.text.trim(),
+              'meeting_point': meetingPoint,
+            },
+          );
+        }
+      }
 
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -127,6 +160,7 @@ class _CoordinatorTasksTabState extends State<CoordinatorTasksTab> {
 
       _titleCtrl.clear();
       _descCtrl.clear();
+      _volunteerCtrl.clear();
       _latCtrl.clear();
       _lngCtrl.clear();
       await _load();
@@ -156,6 +190,73 @@ class _CoordinatorTasksTabState extends State<CoordinatorTasksTab> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Update failed: $e')));
+    }
+  }
+
+  Future<void> _showVotes(String taskId) async {
+    try {
+      final raw = await widget.api.get('/api/v1/tasks/$taskId/votes');
+      final votes = (raw is Map<String, dynamic> && raw['votes'] is List)
+          ? (raw['votes'] as List).cast<Map<String, dynamic>>()
+          : <Map<String, dynamic>>[];
+      final summary =
+          (raw is Map<String, dynamic> &&
+              raw['summary'] is Map<String, dynamic>)
+          ? raw['summary'] as Map<String, dynamic>
+          : <String, dynamic>{};
+
+      if (!mounted) return;
+      showModalBottomSheet<void>(
+        context: context,
+        builder: (context) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Completion Votes',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Completed: ${summary['completed_votes'] ?? 0} • Rejected: ${summary['rejected_votes'] ?? 0} • Total: ${summary['total_votes'] ?? 0}',
+                ),
+                const SizedBox(height: 10),
+                Expanded(
+                  child: votes.isEmpty
+                      ? const Center(child: Text('No votes yet'))
+                      : ListView.builder(
+                          itemCount: votes.length,
+                          itemBuilder: (_, i) {
+                            final v = votes[i];
+                            return ListTile(
+                              leading: const Icon(Icons.how_to_vote_outlined),
+                              title: Text(
+                                (v['voter_name'] ?? 'Volunteer').toString(),
+                              ),
+                              subtitle: Text((v['note'] ?? '').toString()),
+                              trailing: Chip(
+                                label: Text(
+                                  (v['vote'] ?? '').toString().toUpperCase(),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to fetch votes: $e')));
     }
   }
 
@@ -240,7 +341,7 @@ class _CoordinatorTasksTabState extends State<CoordinatorTasksTab> {
                   TextField(
                     controller: _volunteerCtrl,
                     decoration: const InputDecoration(
-                      labelText: 'Volunteer ID',
+                      labelText: 'Volunteer IDs (comma separated)',
                       prefixIcon: Icon(Icons.person_outline),
                     ),
                   ),
@@ -331,9 +432,52 @@ class _CoordinatorTasksTabState extends State<CoordinatorTasksTab> {
                                 : () => _updateTaskStatus(id, 'completed'),
                             child: const Text('Mark Completed'),
                           ),
+                          TextButton(
+                            onPressed: id.isEmpty ? null : () => _showVotes(id),
+                            child: const Text('View Votes'),
+                          ),
                         ],
                       ),
                     ],
+                  ),
+                ),
+              );
+            }),
+          const SizedBox(height: 14),
+          Text(
+            'Completed History',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          if (_history.isEmpty)
+            const Card(
+              child: Padding(
+                padding: EdgeInsets.all(14),
+                child: Text('No completed task history yet.'),
+              ),
+            )
+          else
+            ..._history.take(20).map((task) {
+              final id = (task['id'] ?? '').toString();
+              final title = (task['title'] ?? task['type'] ?? 'Task')
+                  .toString();
+              final completedAt = (task['completed_at'] ?? '').toString();
+              return Card(
+                child: ListTile(
+                  leading: const CircleAvatar(
+                    backgroundColor: AppColors.primaryGreen,
+                    foregroundColor: Colors.white,
+                    child: Icon(Icons.check),
+                  ),
+                  title: Text(title),
+                  subtitle: Text(
+                    completedAt.isEmpty ? 'Completed' : completedAt,
+                  ),
+                  trailing: TextButton(
+                    onPressed: id.isEmpty ? null : () => _showVotes(id),
+                    child: const Text('Votes'),
                   ),
                 ),
               );

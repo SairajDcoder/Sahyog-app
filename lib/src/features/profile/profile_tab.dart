@@ -19,6 +19,13 @@ class ProfileTab extends StatefulWidget {
 class _ProfileTabState extends State<ProfileTab> {
   bool _trackingEnabled = false;
   bool _busy = false;
+  bool _availability = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _availability = widget.user.isActive;
+  }
 
   Future<void> _syncLocationOnce() async {
     try {
@@ -27,21 +34,53 @@ class _ProfileTabState extends State<ProfileTab> {
       final location = await LocationService().getCurrentPosition();
 
       await widget.api.put(
-        '/api/v1/users/me/location',
+        '/api/users/me/location',
         body: {'lat': location.latitude, 'lng': location.longitude},
       );
 
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Location synced successfully')),
       );
     } catch (e) {
       if (!mounted) return;
-
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Location sync failed: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _toggleAvailability(bool value) async {
+    try {
+      setState(() => _busy = true);
+      final raw = await widget.api.patch(
+        '/api/users/me/availability',
+        body: {'is_active': value},
+      );
+      if (!mounted) return;
+
+      final next = (raw is Map<String, dynamic> && raw['is_active'] is bool)
+          ? raw['is_active'] as bool
+          : value;
+      setState(() => _availability = next);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            next
+                ? 'You are now marked active.'
+                : 'You are now marked inactive.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _availability = !_availability);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Availability update failed: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -55,13 +94,11 @@ class _ProfileTabState extends State<ProfileTab> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isVolunteer = widget.user.isVolunteer;
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        /// =========================
-        /// HEADER CARD (Identity)
-        /// =========================
         ClerkAuthBuilder(
           signedInBuilder: (context, authState) {
             final clerkUser = authState.user;
@@ -103,7 +140,7 @@ class _ProfileTabState extends State<ProfileTab> {
                       ),
                     ),
                     Text(
-                      email.isEmpty ? "No email linked" : email,
+                      email.isEmpty ? 'No email linked' : email,
                       style: theme.textTheme.bodyMedium,
                     ),
                     const SizedBox(height: 12),
@@ -126,61 +163,80 @@ class _ProfileTabState extends State<ProfileTab> {
 
         const SizedBox(height: 16),
 
-        /// =========================
-        /// OPERATIONAL INFO
-        /// =========================
-        const SizedBox(height: 16),
-
-        /// =========================
-        /// LOCATION SYNC
-        /// =========================
-        Card(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            children: [
-              SwitchListTile(
-                value: _trackingEnabled,
-                onChanged: (value) {
-                  setState(() => _trackingEnabled = value);
-                  if (value) _syncLocationOnce();
-                },
-                title: const Text("Enable Location Sync"),
-                subtitle: const Text("Required for live disaster monitoring."),
-              ),
-              if (_trackingEnabled)
-                Padding(
-                  padding: const EdgeInsets.only(
-                    left: 16,
-                    right: 16,
-                    bottom: 16,
-                  ),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _busy ? null : _syncLocationOnce,
-                      icon: const Icon(Icons.my_location),
-                      label: const Text("Sync Now"),
-                    ),
+        if (isVolunteer)
+          Card(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              children: [
+                SwitchListTile(
+                  value: _availability,
+                  onChanged: _busy
+                      ? null
+                      : (value) {
+                          setState(() => _availability = value);
+                          _toggleAvailability(value);
+                        },
+                  title: const Text('Volunteer Availability'),
+                  subtitle: const Text(
+                    'Reflects directly to server live status.',
                   ),
                 ),
-            ],
+                SwitchListTile(
+                  value: _trackingEnabled,
+                  onChanged: _busy
+                      ? null
+                      : (value) {
+                          setState(() => _trackingEnabled = value);
+                          if (value) _syncLocationOnce();
+                        },
+                  title: const Text('Enable Location Sync'),
+                  subtitle: const Text(
+                    'Required for live disaster monitoring.',
+                  ),
+                ),
+                if (_trackingEnabled)
+                  Padding(
+                    padding: const EdgeInsets.only(
+                      left: 16,
+                      right: 16,
+                      bottom: 16,
+                    ),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _busy ? null : _syncLocationOnce,
+                        icon: const Icon(Icons.my_location),
+                        label: const Text('Sync Now'),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          )
+        else
+          Card(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Availability and location toggle are enabled only for volunteer login.',
+              ),
+            ),
           ),
-        ),
 
         const SizedBox(height: 16),
 
-        /// =========================
-        /// CLERK ACCOUNT SECTION
-        /// =========================
         Card(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
           child: ExpansionTile(
             leading: const Icon(Icons.account_circle),
-            title: const Text("Manage Account"),
+            title: const Text('Manage Account'),
             children: const [
               Padding(
                 padding: EdgeInsets.all(12),
@@ -192,9 +248,6 @@ class _ProfileTabState extends State<ProfileTab> {
 
         const SizedBox(height: 24),
 
-        /// =========================
-        /// SIGN OUT
-        /// =========================
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
@@ -204,7 +257,7 @@ class _ProfileTabState extends State<ProfileTab> {
               backgroundColor: Colors.redAccent,
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),
-            label: const Text("Sign Out"),
+            label: const Text('Sign Out'),
           ),
         ),
       ],

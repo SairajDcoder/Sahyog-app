@@ -16,13 +16,8 @@ class CoordinatorVolunteersTab extends StatefulWidget {
 }
 
 class _CoordinatorVolunteersTabState extends State<CoordinatorVolunteersTab> {
-  final _needIdController = TextEditingController();
-  final _volunteerIdController = TextEditingController();
-
-  List<Map<String, dynamic>> _needs = [];
-  List<String> _derivedVolunteerIds = [];
+  List<Map<String, dynamic>> _volunteers = [];
   bool _loading = true;
-  bool _submitting = false;
   String _error = '';
   Timer? _pollTimer;
 
@@ -30,7 +25,7 @@ class _CoordinatorVolunteersTabState extends State<CoordinatorVolunteersTab> {
   void initState() {
     super.initState();
     _load();
-    _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+    _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) _load(silent: true);
     });
   }
@@ -38,8 +33,6 @@ class _CoordinatorVolunteersTabState extends State<CoordinatorVolunteersTab> {
   @override
   void dispose() {
     _pollTimer?.cancel();
-    _needIdController.dispose();
-    _volunteerIdController.dispose();
     super.dispose();
   }
 
@@ -52,21 +45,14 @@ class _CoordinatorVolunteersTabState extends State<CoordinatorVolunteersTab> {
         });
       }
 
-      final needsRaw = await widget.api.get('/api/v1/needs');
-      final needs = (needsRaw is List)
-          ? needsRaw.cast<Map<String, dynamic>>()
+      final raw = await widget.api.get('/api/v1/coordinator/volunteers');
+      final list = (raw is List)
+          ? raw.cast<Map<String, dynamic>>()
           : <Map<String, dynamic>>[];
-
-      final volunteerIds = <String>{};
-      for (final need in needs) {
-        final id = need['assigned_volunteer_id']?.toString();
-        if (id != null && id.isNotEmpty) volunteerIds.add(id);
-      }
 
       if (!mounted) return;
       setState(() {
-        _needs = needs;
-        _derivedVolunteerIds = volunteerIds.toList()..sort();
+        _volunteers = list;
         _loading = false;
       });
     } catch (e) {
@@ -78,45 +64,9 @@ class _CoordinatorVolunteersTabState extends State<CoordinatorVolunteersTab> {
     }
   }
 
-  Future<void> _assignVolunteer() async {
-    final needId = _needIdController.text.trim();
-    final volunteerId = _volunteerIdController.text.trim();
-
-    if (needId.isEmpty || volunteerId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Need ID and Volunteer ID are required.')),
-      );
-      return;
-    }
-
-    try {
-      setState(() => _submitting = true);
-      await widget.api.patch(
-        '/api/v1/needs/$needId/assign',
-        body: {'volunteer_id': volunteerId},
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Volunteer assigned.')));
-      _needIdController.clear();
-      _volunteerIdController.clear();
-      await _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Assignment failed: $e')));
-    } finally {
-      if (mounted) setState(() => _submitting = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    if (_loading) return const Center(child: CircularProgressIndicator());
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -131,102 +81,100 @@ class _CoordinatorVolunteersTabState extends State<CoordinatorVolunteersTab> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Live operational view from coordinator-accessible endpoints. Admin-only volunteer endpoints are not exposed to coordinator role.',
+            'Live activity and assignment signal for all volunteers in operation.',
           ),
           if (_error.isNotEmpty) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Text(_error, style: const TextStyle(color: AppColors.criticalRed)),
           ],
-          const SizedBox(height: 14),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Assign Volunteer To Need',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _needIdController,
-                    decoration: const InputDecoration(
-                      labelText: 'Need ID',
-                      prefixIcon: Icon(Icons.report),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _volunteerIdController,
-                    decoration: const InputDecoration(
-                      labelText: 'Volunteer ID',
-                      prefixIcon: Icon(Icons.person),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  FilledButton.icon(
-                    onPressed: _submitting ? null : _assignVolunteer,
-                    icon: const Icon(Icons.assignment_ind_outlined),
-                    label: const Text('Assign'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            'Active Volunteers (Derived)',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 8),
-          if (_derivedVolunteerIds.isEmpty)
+          const SizedBox(height: 12),
+          if (_volunteers.isEmpty)
             const Card(
               child: Padding(
                 padding: EdgeInsets.all(14),
-                child: Text(
-                  'No assigned volunteers found from current need records.',
-                ),
+                child: Text('No volunteer records found.'),
               ),
             )
           else
-            ..._derivedVolunteerIds.map(
-              (id) => Card(
-                child: ListTile(
-                  leading: const CircleAvatar(
-                    backgroundColor: AppColors.primaryGreen,
-                    foregroundColor: Colors.white,
-                    child: Icon(Icons.volunteer_activism_outlined),
+            ..._volunteers.map((v) {
+              final name = (v['full_name'] ?? 'Unnamed').toString();
+              final email = (v['email'] ?? '').toString();
+              final active = v['is_active'] == true;
+              final verified = v['is_verified'] == true;
+              final lastActive = (v['last_active'] ?? '').toString();
+              final activeTasks = (v['active_tasks'] ?? 0).toString();
+              final completedTasks = (v['completed_tasks'] ?? 0).toString();
+
+              return Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            backgroundColor: active
+                                ? AppColors.primaryGreen
+                                : Colors.grey,
+                            foregroundColor: Colors.white,
+                            child: Text(
+                              name.isNotEmpty ? name[0].toUpperCase() : '?',
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  name,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                Text(
+                                  email,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Chip(
+                            label: Text(active ? 'ACTIVE' : 'INACTIVE'),
+                            backgroundColor:
+                                (active ? AppColors.primaryGreen : Colors.grey)
+                                    .withValues(alpha: 0.15),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          if (verified)
+                            const Chip(
+                              avatar: Icon(
+                                Icons.verified,
+                                size: 16,
+                                color: AppColors.primaryGreen,
+                              ),
+                              label: Text('Verified'),
+                            ),
+                          Chip(label: Text('Active Tasks: $activeTasks')),
+                          Chip(label: Text('Completed: $completedTasks')),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Last active: ${lastActive.isEmpty ? 'Unknown' : lastActive}',
+                      ),
+                    ],
                   ),
-                  title: Text('Volunteer $id'),
-                  subtitle: const Text('Status source: assigned needs'),
                 ),
-              ),
-            ),
-          const SizedBox(height: 14),
-          Text(
-            'Need Assignments Snapshot',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 8),
-          ..._needs.take(10).map((need) {
-            final status = (need['status'] ?? 'unassigned').toString();
-            final volunteerId = (need['assigned_volunteer_id'] ?? '-')
-                .toString();
-            return Card(
-              child: ListTile(
-                title: Text((need['type'] ?? 'Need').toString()),
-                subtitle: Text('Volunteer: $volunteerId'),
-                trailing: Chip(label: Text(status.toUpperCase())),
-              ),
-            );
-          }),
+              );
+            }),
         ],
       ),
     );

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
+import '../../core/location_service.dart';
 import '../../theme/app_colors.dart';
 
 /// Coordinator Missing Persons — single tab (no report form).
@@ -25,6 +26,14 @@ class _CoordinatorMissingTabState extends State<CoordinatorMissingTab> {
   String _sortBy = 'created_at';
   String _sortOrder = 'desc';
 
+  final _phoneCtrl = TextEditingController();
+  final _nameCtrl = TextEditingController();
+  final _ageCtrl = TextEditingController();
+  final _photoCtrl = TextEditingController();
+  double? _lat;
+  double? _lng;
+  bool _submitting = false;
+
   @override
   void initState() {
     super.initState();
@@ -37,16 +46,21 @@ class _CoordinatorMissingTabState extends State<CoordinatorMissingTab> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _phoneCtrl.dispose();
+    _nameCtrl.dispose();
+    _ageCtrl.dispose();
+    _photoCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _loadBoard({bool silent = false}) async {
     try {
-      if (!silent)
+      if (!silent) {
         setState(() {
           _loading = true;
           _error = '';
         });
+      }
       final raw = await widget.api.get(
         '/api/v1/coordinator/missing',
         query: {'sort': _sortBy, 'order': _sortOrder},
@@ -83,66 +97,231 @@ class _CoordinatorMissingTabState extends State<CoordinatorMissingTab> {
     }
   }
 
+  Future<void> _useCurrentLocation(StateSetter setModalState) async {
+    try {
+      final pos = await LocationService().getCurrentPosition();
+      setModalState(() {
+        _lat = pos.latitude;
+        _lng = pos.longitude;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Location error: $e')));
+    }
+  }
+
+  Future<void> _submitReport() async {
+    final phone = _phoneCtrl.text.trim();
+    if (phone.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Phone is required.')));
+      return;
+    }
+
+    setState(() => _submitting = true);
+    try {
+      final body = <String, dynamic>{
+        'reporter_phone': phone,
+        if (_nameCtrl.text.trim().isNotEmpty) 'name': _nameCtrl.text.trim(),
+        if (_ageCtrl.text.trim().isNotEmpty)
+          'age': int.tryParse(_ageCtrl.text.trim()),
+        if (_photoCtrl.text.trim().isNotEmpty)
+          'photo_url': _photoCtrl.text.trim(),
+        if (_lat != null && _lng != null)
+          'last_known_location': {'lat': _lat, 'lng': _lng},
+      };
+
+      await widget.api.post('/api/v1/missing', body: body);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Report submitted successfully.')),
+      );
+
+      _phoneCtrl.clear();
+      _nameCtrl.clear();
+      _ageCtrl.clear();
+      _photoCtrl.clear();
+      _lat = null;
+      _lng = null;
+
+      Navigator.of(context).pop();
+      _loadBoard();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Submission failed: $e')));
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  void _showReportDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (stctx, setModalState) {
+            return AlertDialog(
+              title: const Text('Report Missing Person'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: _phoneCtrl,
+                      keyboardType: TextInputType.phone,
+                      decoration: const InputDecoration(
+                        labelText: 'Reporter Phone *',
+                        prefixIcon: Icon(Icons.phone),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _nameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Missing Person Name',
+                        prefixIcon: Icon(Icons.person),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _ageCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Approximate Age',
+                        prefixIcon: Icon(Icons.cake_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _photoCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Photo URL',
+                        prefixIcon: Icon(Icons.photo_camera_back_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.my_location),
+                          onPressed: () => _useCurrentLocation(setModalState),
+                        ),
+                        Expanded(
+                          child: Text(
+                            _lat == null
+                                ? 'No location'
+                                : '${_lat!.toStringAsFixed(3)}, ${_lng!.toStringAsFixed(3)}',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: _submitting ? null : _submitReport,
+                  child: const Text('Submit'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Sort controls
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: Row(
-            children: [
-              Text('Sort by:', style: Theme.of(context).textTheme.bodySmall),
-              const SizedBox(width: 8),
-              DropdownButton<String>(
-                value: _sortBy,
-                underline: const SizedBox(),
-                isDense: true,
-                items: const [
-                  DropdownMenuItem(value: 'created_at', child: Text('Date')),
-                  DropdownMenuItem(value: 'name', child: Text('Name')),
-                  DropdownMenuItem(value: 'status', child: Text('Status')),
-                  DropdownMenuItem(value: 'age', child: Text('Age')),
+    return Scaffold(
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showReportDialog,
+        backgroundColor: AppColors.primaryGreen,
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Sort controls
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Row(
+                children: [
+                  Text(
+                    'Sort by:',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(width: 8),
+                  DropdownButton<String>(
+                    value: _sortBy,
+                    underline: const SizedBox(),
+                    isDense: true,
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'created_at',
+                        child: Text('Date'),
+                      ),
+                      DropdownMenuItem(value: 'name', child: Text('Name')),
+                      DropdownMenuItem(value: 'status', child: Text('Status')),
+                      DropdownMenuItem(value: 'age', child: Text('Age')),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) {
+                        setState(() => _sortBy = val);
+                        _loadBoard();
+                      }
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: Icon(
+                      _sortOrder == 'desc'
+                          ? Icons.arrow_downward
+                          : Icons.arrow_upward,
+                      size: 18,
+                    ),
+                    tooltip: _sortOrder == 'desc'
+                        ? 'Newest first'
+                        : 'Oldest first',
+                    onPressed: () {
+                      setState(
+                        () =>
+                            _sortOrder = _sortOrder == 'desc' ? 'asc' : 'desc',
+                      );
+                      _loadBoard();
+                    },
+                  ),
+                  const Spacer(),
+                  Text(
+                    '${_board.length} reports',
+                    style: const TextStyle(fontSize: 12),
+                  ),
                 ],
-                onChanged: (val) {
-                  if (val != null) {
-                    setState(() => _sortBy = val);
-                    _loadBoard();
-                  }
-                },
               ),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: Icon(
-                  _sortOrder == 'desc'
-                      ? Icons.arrow_downward
-                      : Icons.arrow_upward,
-                  size: 18,
-                ),
-                tooltip: _sortOrder == 'desc' ? 'Newest first' : 'Oldest first',
-                onPressed: () {
-                  setState(
-                    () => _sortOrder = _sortOrder == 'desc' ? 'asc' : 'desc',
-                  );
-                  _loadBoard();
-                },
-              ),
-              const Spacer(),
-              Text(
-                '${_board.length} reports',
-                style: const TextStyle(fontSize: 12),
-              ),
-            ],
-          ),
+            ),
+            const Divider(height: 1),
+            // Board
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : RefreshIndicator(
+                      onRefresh: _loadBoard,
+                      child: _buildBoard(),
+                    ),
+            ),
+          ],
         ),
-        const Divider(height: 1),
-        // Board
-        Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : RefreshIndicator(onRefresh: _loadBoard, child: _buildBoard()),
-        ),
-      ],
+      ),
     );
   }
 

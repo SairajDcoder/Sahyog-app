@@ -57,11 +57,12 @@ class _CoordinatorOperationsTabState extends State<CoordinatorOperationsTab> {
 
   Future<void> _load({bool silent = false}) async {
     try {
-      if (!silent)
+      if (!silent) {
         setState(() {
           _loading = true;
           _error = '';
         });
+      }
       final results = await Future.wait([
         widget.api.get('/api/v1/coordinator/volunteers'),
         widget.api.get('/api/v1/coordinator/tasks'),

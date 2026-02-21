@@ -5,6 +5,7 @@ class AppUser {
     required this.email,
     required this.role,
     this.organizationId,
+    this.isActive = true,
   });
 
   final String id;
@@ -12,6 +13,7 @@ class AppUser {
   final String email;
   final String role;
   final String? organizationId;
+  final bool isActive;
 
   AppUser copyWith({
     String? id,
@@ -19,6 +21,7 @@ class AppUser {
     String? email,
     String? role,
     String? organizationId,
+    bool? isActive,
   }) {
     return AppUser(
       id: id ?? this.id,
@@ -26,6 +29,7 @@ class AppUser {
       email: email ?? this.email,
       role: role ?? this.role,
       organizationId: organizationId ?? this.organizationId,
+      isActive: isActive ?? this.isActive,
     );
   }
 
@@ -41,6 +45,7 @@ class AppUser {
       email: (json['email'] ?? '').toString(),
       role: normalizeRole((json['role'] ?? 'volunteer').toString()),
       organizationId: json['organization_id']?.toString(),
+      isActive: json['is_active'] is bool ? json['is_active'] as bool : true,
     );
   }
 
@@ -51,6 +56,7 @@ class AppUser {
       email: (json['email'] ?? '').toString(),
       role: normalizeRole((json['role'] ?? 'volunteer').toString()),
       organizationId: json['organization_id']?.toString(),
+      isActive: json['is_active'] is bool ? json['is_active'] as bool : true,
     );
   }
 }

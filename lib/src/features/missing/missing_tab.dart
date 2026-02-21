@@ -135,6 +135,54 @@ class _MissingTabState extends State<MissingTab> {
     }
   }
 
+  Future<void> _markFound(String missingId) async {
+    final noteCtrl = TextEditingController();
+    final note = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Close Missing Report'),
+        content: TextField(
+          controller: noteCtrl,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            labelText: 'Closure description',
+            hintText: 'Add found details...',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, noteCtrl.text.trim()),
+            child: const Text('Mark Found'),
+          ),
+        ],
+      ),
+    );
+    noteCtrl.dispose();
+
+    if (note == null) return;
+
+    try {
+      await widget.api.patch(
+        '/api/v1/missing/$missingId/found',
+        body: {'description': note},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Missing report closed as found.')),
+      );
+      await _loadBoard();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Close failed: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
@@ -208,21 +256,31 @@ class _MissingTabState extends State<MissingTab> {
         final status = (item['status'] ?? 'missing').toString();
         final name = (item['name'] ?? 'Unnamed').toString();
         return Card(
-          child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: status == 'found'
-                  ? AppColors.primaryGreen.withValues(alpha: 0.15)
-                  : AppColors.criticalRed.withValues(alpha: 0.15),
-              child: Icon(
-                status == 'found' ? Icons.verified : Icons.person_search,
-                color: status == 'found'
-                    ? AppColors.primaryGreen
-                    : AppColors.criticalRed,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: status == 'found'
+                    ? AppColors.primaryGreen.withValues(alpha: 0.15)
+                    : AppColors.criticalRed.withValues(alpha: 0.15),
+                child: Icon(
+                  status == 'found' ? Icons.verified : Icons.person_search,
+                  color: status == 'found'
+                      ? AppColors.primaryGreen
+                      : AppColors.criticalRed,
+                ),
               ),
-            ),
-            title: Text(name),
-            subtitle: Text(
-              'Age: ${item['age'] ?? 'Unknown'} • Status: $status',
+              title: Text(name),
+              subtitle: Text(
+                'Age: ${item['age'] ?? 'Unknown'} • Status: $status',
+              ),
+              trailing: status == 'found'
+                  ? const Chip(label: Text('FOUND'))
+                  : FilledButton.tonal(
+                      onPressed: () =>
+                          _markFound((item['id'] ?? '').toString()),
+                      child: const Text('Mark Found'),
+                    ),
             ),
           ),
         );

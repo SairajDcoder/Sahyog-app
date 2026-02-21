@@ -22,6 +22,7 @@ class HomeTab extends StatefulWidget {
 
 class _HomeTabState extends State<HomeTab> {
   final _locationService = LocationService();
+  final MapController _miniMapController = MapController();
 
   Position? _position;
   bool _loading = true;
@@ -202,47 +203,85 @@ class _HomeTabState extends State<HomeTab> {
       if (lat != null && lng != null) center = LatLng(lat, lng);
     }
 
-    return FlutterMap(
-      options: MapOptions(initialCenter: center, initialZoom: 12),
+    return Stack(
       children: [
-        TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.example.sahyog_app',
+        FlutterMap(
+          mapController: _miniMapController,
+          options: MapOptions(initialCenter: center, initialZoom: 12),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.example.sahyog_app',
+            ),
+            if (_position != null)
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: LatLng(_position!.latitude, _position!.longitude),
+                    width: 34,
+                    height: 34,
+                    child: const Icon(
+                      Icons.my_location,
+                      color: AppColors.primaryGreen,
+                      size: 28,
+                    ),
+                  ),
+                ],
+              ),
+            CircleLayer(
+              circles: _zones.map((zone) {
+                final lat = parseLat(zone['center_lat']);
+                final lng = parseLng(zone['center_lng']);
+                if (lat == null || lng == null) {
+                  return const CircleMarker(point: LatLng(0, 0), radius: 0);
+                }
+                final severity = (zone['severity'] ?? 'red').toString();
+                final radius = parseLat(zone['radius_meters']) ?? 500;
+                final color = _severityColor(severity);
+                return CircleMarker(
+                  point: LatLng(lat, lng),
+                  radius: radius,
+                  useRadiusInMeter: true,
+                  color: color.withValues(alpha: 0.18),
+                  borderColor: color,
+                  borderStrokeWidth: 2,
+                );
+              }).toList(),
+            ),
+          ],
         ),
-        if (_position != null)
-          MarkerLayer(
-            markers: [
-              Marker(
-                point: LatLng(_position!.latitude, _position!.longitude),
-                width: 34,
-                height: 34,
-                child: const Icon(
-                  Icons.my_location,
-                  color: AppColors.primaryGreen,
-                  size: 28,
-                ),
+        Positioned(
+          right: 10,
+          bottom: 10,
+          child: Column(
+            children: [
+              FloatingActionButton.small(
+                heroTag: 'home_mini_map_zoom_in',
+                onPressed: () {
+                  _miniMapController.move(
+                    _miniMapController.camera.center,
+                    _miniMapController.camera.zoom + 1,
+                  );
+                },
+                backgroundColor: Colors.white,
+                foregroundColor: AppColors.primaryGreen,
+                child: const Icon(Icons.add),
+              ),
+              const SizedBox(height: 8),
+              FloatingActionButton.small(
+                heroTag: 'home_mini_map_zoom_out',
+                onPressed: () {
+                  _miniMapController.move(
+                    _miniMapController.camera.center,
+                    _miniMapController.camera.zoom - 1,
+                  );
+                },
+                backgroundColor: Colors.white,
+                foregroundColor: AppColors.primaryGreen,
+                child: const Icon(Icons.remove),
               ),
             ],
           ),
-        CircleLayer(
-          circles: _zones.map((zone) {
-            final lat = parseLat(zone['center_lat']);
-            final lng = parseLng(zone['center_lng']);
-            if (lat == null || lng == null) {
-              return const CircleMarker(point: LatLng(0, 0), radius: 0);
-            }
-            final severity = (zone['severity'] ?? 'red').toString();
-            final radius = parseLat(zone['radius_meters']) ?? 500;
-            final color = _severityColor(severity);
-            return CircleMarker(
-              point: LatLng(lat, lng),
-              radius: radius,
-              useRadiusInMeter: true,
-              color: color.withValues(alpha: 0.18),
-              borderColor: color,
-              borderStrokeWidth: 2,
-            );
-          }).toList(),
         ),
       ],
     );
