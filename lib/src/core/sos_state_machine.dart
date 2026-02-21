@@ -7,6 +7,7 @@
 library;
 
 import 'package:uuid/uuid.dart';
+import 'ble_payload_codec.dart';
 
 // ─────────────────────────────────────────────────────────────
 // SOS Status Enum
@@ -87,6 +88,12 @@ enum SosStatus {
 
   /// Can this status be synced to the backend?
   bool get isSyncable => this == SosStatus.activeOffline;
+
+  /// Should BLE advertiser be running?
+  bool get isBleAdvertisable =>
+      this == SosStatus.activeOffline ||
+      this == SosStatus.syncing ||
+      this == SosStatus.activeOnline;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -106,9 +113,14 @@ class SosIncident {
     this.retryCount = 0,
     this.deliveryChannel,
     this.backendId,
+    this.source = 'direct',
+    this.hopCount = 0,
+    int? uuidHash,
+    this.relayDeviceId,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) : uuid = uuid ?? const Uuid().v4(),
+       uuidHash = uuidHash ?? Crc32.compute(uuid ?? ''),
        createdAt = createdAt ?? DateTime.now(),
        updatedAt = updatedAt ?? DateTime.now();
 
@@ -123,6 +135,10 @@ class SosIncident {
   final int retryCount;
   final String? deliveryChannel;
   final String? backendId;
+  final String source; // 'direct' | 'mesh_relay'
+  final int hopCount; // 0 for direct, 1+ for relay
+  final int uuidHash; // CRC32 of UUID for BLE matching
+  final String? relayDeviceId; // Device ID of relay originator
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -135,6 +151,9 @@ class SosIncident {
     String? backendId,
     double? lat,
     double? lng,
+    String? source,
+    int? hopCount,
+    String? relayDeviceId,
   }) {
     return SosIncident(
       uuid: uuid,
@@ -148,6 +167,10 @@ class SosIncident {
       retryCount: retryCount ?? this.retryCount,
       deliveryChannel: deliveryChannel ?? this.deliveryChannel,
       backendId: backendId ?? this.backendId,
+      source: source ?? this.source,
+      hopCount: hopCount ?? this.hopCount,
+      uuidHash: uuidHash,
+      relayDeviceId: relayDeviceId ?? this.relayDeviceId,
       createdAt: createdAt,
       updatedAt: DateTime.now(),
     );
@@ -167,6 +190,10 @@ class SosIncident {
       'retry_count': retryCount,
       'delivery_channel': deliveryChannel,
       'backend_id': backendId,
+      'source': source,
+      'hop_count': hopCount,
+      'uuid_hash': uuidHash,
+      'relay_device_id': relayDeviceId,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
     };
@@ -186,6 +213,10 @@ class SosIncident {
       retryCount: (map['retry_count'] as int?) ?? 0,
       deliveryChannel: map['delivery_channel'] as String?,
       backendId: map['backend_id'] as String?,
+      source: (map['source'] as String?) ?? 'direct',
+      hopCount: (map['hop_count'] as int?) ?? 0,
+      uuidHash: (map['uuid_hash'] as int?) ?? 0,
+      relayDeviceId: map['relay_device_id'] as String?,
       createdAt:
           DateTime.tryParse(map['created_at'] as String? ?? '') ??
           DateTime.now(),
@@ -211,6 +242,7 @@ class SosStateMachine {
       SosStatus.syncing,
       SosStatus.cancelled,
       SosStatus.failed,
+      SosStatus.acknowledged, // BLE ACK received while offline
     },
     SosStatus.syncing: {
       SosStatus.activeOnline,

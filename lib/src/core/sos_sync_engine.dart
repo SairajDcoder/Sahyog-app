@@ -179,7 +179,11 @@ class SosSyncEngine {
           'lng': (incident.lng != null && incident.lng != 0.0)
               ? incident.lng
               : 73.8567,
-          'client_uuid': incident.uuid,
+          'client_uuid': incident.source == 'mesh_relay'
+              ? 'relay_${incident.uuidHash}'
+              : incident.uuid,
+          'source': incident.source,
+          'hop_count': incident.hopCount,
         };
 
         if (incident.description != null) {
