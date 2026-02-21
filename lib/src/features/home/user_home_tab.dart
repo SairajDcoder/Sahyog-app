@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
@@ -7,9 +8,12 @@ import 'package:latlong2/latlong.dart';
 import '../../core/api_client.dart';
 import '../../core/location_service.dart';
 import '../../core/models.dart';
-import '../../theme/app_colors.dart';
-import '../../core/database_helper.dart';
 import '../../core/socket_service.dart';
+import '../../core/database_helper.dart';
+import '../../core/sos_state_machine.dart';
+import '../../core/sos_sync_engine.dart';
+import '../../theme/app_colors.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class UserHomeTab extends StatefulWidget {
   const UserHomeTab({super.key, required this.api, required this.user});
@@ -35,6 +39,7 @@ class _UserHomeTabState extends State<UserHomeTab>
   int _sosHoldTicks = 0;
   bool _sosFired = false;
   String? _activeSosId;
+  String? _activeLocalUuid; // UUID of the active local SOS incident
 
   // Track global SOS from sockets: {id: LatLng}
   final Map<String, LatLng> _globalActiveSos = {};
@@ -42,6 +47,7 @@ class _UserHomeTabState extends State<UserHomeTab>
   @override
   void initState() {
     super.initState();
+    _loadActiveSos();
     _load();
     _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) _load(silent: true);
@@ -49,6 +55,43 @@ class _UserHomeTabState extends State<UserHomeTab>
 
     SocketService.instance.onNewSosAlert.addListener(_onRemoteSosReceived);
     SocketService.instance.onSosResolved.addListener(_onRemoteSosResolved);
+    SosSyncEngine.instance.syncCompletionNotifier.addListener(
+      _onBackgroundSyncComplete,
+    );
+  }
+
+  void _onBackgroundSyncComplete() {
+    final id = SosSyncEngine.instance.syncCompletionNotifier.value;
+    if (id != null && mounted) {
+      setState(() {
+        _activeSosId = id;
+        _sosFired = true;
+      });
+    }
+  }
+
+  Future<void> _loadActiveSos() async {
+    // Check SharedPreferences for a persisted backend ID
+    final prefs = await SharedPreferences.getInstance();
+    final savedId = prefs.getString('active_sos_id');
+    if (savedId != null) {
+      setState(() {
+        _activeSosId = savedId;
+        _sosFired = true;
+      });
+      return;
+    }
+
+    // Check SQLite for any active local incident
+    final db = DatabaseHelper.instance;
+    final active = await db.getActiveIncident(widget.user.id);
+    if (active != null) {
+      setState(() {
+        _activeLocalUuid = active.uuid;
+        _activeSosId = active.backendId;
+        _sosFired = true;
+      });
+    }
   }
 
   void _onRemoteSosReceived() {
@@ -60,13 +103,12 @@ class _UserHomeTabState extends State<UserHomeTab>
       final coords = locRaw['coordinates'];
       if (coords.length >= 2) {
         final id = payload['id'].toString();
-        // Skip our own SOS since we center on it anyway
         if (id == _activeSosId) return;
 
         setState(() {
           _globalActiveSos[id] = LatLng(
-            (coords[1] as num).toDouble(), // Lat
-            (coords[0] as num).toDouble(), // Lng
+            (coords[1] as num).toDouble(),
+            (coords[0] as num).toDouble(),
           );
         });
       }
@@ -89,6 +131,9 @@ class _UserHomeTabState extends State<UserHomeTab>
     _sosHoldTimer?.cancel();
     SocketService.instance.onNewSosAlert.removeListener(_onRemoteSosReceived);
     SocketService.instance.onSosResolved.removeListener(_onRemoteSosResolved);
+    SosSyncEngine.instance.syncCompletionNotifier.removeListener(
+      _onBackgroundSyncComplete,
+    );
     super.dispose();
   }
 
@@ -129,75 +174,230 @@ class _UserHomeTabState extends State<UserHomeTab>
   @override
   bool get wantKeepAlive => true;
 
-  Future<void> _triggerSOS() async {
-    // 1. Save locally for offline resilience
-    final incident = {
-      'reporter_id': widget.user.id,
-      'location_lat': _position?.latitude,
-      'location_lng': _position?.longitude,
-      'captured_at': DateTime.now().toIso8601String(),
-    };
-    await DatabaseHelper.instance.insertIncident(incident);
+  // ─────────────────────────────────────────────────────────
+  // SOS Activation — State Machine Driven
+  // ─────────────────────────────────────────────────────────
 
-    // 2. Try to sync immediately to get the real ID, so we can cancel it later
-    try {
-      final res = await widget.api.post(
-        '/api/v1/sos',
-        body: {
-          'lat': _position?.latitude ?? 18.5204,
-          'lng': _position?.longitude ?? 73.8567,
-          'type': 'Emergency',
-        },
-      );
-      if (mounted && res is Map<String, dynamic> && res['id'] != null) {
-        setState(() {
-          _activeSosId = res['id'].toString();
-        });
-      }
-    } catch (_) {
-      // If offline, background sync will handle it, but we can't cancel until it syncs
+  Future<void> _triggerSOS() async {
+    final db = DatabaseHelper.instance;
+
+    // Prevent double-trigger: check if already active
+    final existing = await db.getActiveIncident(widget.user.id);
+    if (existing != null) {
+      SosLog.event(existing.uuid, 'DOUBLE_TRIGGER_BLOCKED');
+      setState(() {
+        _activeLocalUuid = existing.uuid;
+        _activeSosId = existing.backendId;
+        _sosFired = true;
+      });
+      return;
     }
 
-    if (mounted) {
+    // 1. Fetch location (12s timeout, fallback to null)
+    Position? pos = _position;
+    if (pos == null) {
+      try {
+        pos = await _locationService.getCurrentPosition().timeout(
+          const Duration(seconds: 12),
+        );
+      } catch (_) {}
+    }
+
+    // 2. Create SOS incident with UUID
+    final incident = SosIncident(
+      reporterId: widget.user.id,
+      lat: pos?.latitude,
+      lng: pos?.longitude,
+      type: 'Emergency',
+      status: SosStatus.activating,
+    );
+
+    SosLog.event(
+      incident.uuid,
+      'ACTIVATE',
+      'lat=${pos?.latitude}, lng=${pos?.longitude}',
+    );
+
+    // 3. Save to SQLite → transition to active_offline
+    await db.insertSosIncident(incident);
+    await db.atomicUpdateIncident(
+      incident.uuid,
+      status: SosStatus.activeOffline,
+    );
+
+    setState(() {
+      _activeLocalUuid = incident.uuid;
+      _sosFired = true;
+    });
+
+    // 4. Check connectivity and attempt immediate sync
+    final connectivityResult = await Connectivity().checkConnectivity();
+    final isOnline = connectivityResult.any(
+      (r) => r != ConnectivityResult.none,
+    );
+
+    if (!isOnline) {
+      SosLog.event(incident.uuid, 'OFFLINE', 'Queued for background sync');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.wifi_off, color: Colors.white),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'You are offline! SOS saved locally and will broadcast automatically when internet returns.',
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
+      return;
+    }
+
+    // 5. Online — trigger immediate sync via engine
+    SosLog.event(incident.uuid, 'ONLINE_IMMEDIATE_SYNC');
+    await SosSyncEngine.instance.syncAll();
+
+    // Check if sync was successful
+    final updated = await db.getIncidentByUuid(incident.uuid);
+    if (updated != null && updated.status == SosStatus.activeOnline) {
+      setState(() {
+        _activeSosId = updated.backendId;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('SOS Activated! Broadcasting to all responders...'),
+            backgroundColor: AppColors.criticalRed,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('SOS Activated! Broadcasting...'),
-          backgroundColor: AppColors.criticalRed,
-          duration: Duration(seconds: 2),
+          content: Text('SOS saved. Sync pending — will retry automatically.'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 4),
         ),
       );
     }
   }
 
-  Future<void> _cancelSOS() async {
-    if (_activeSosId == null) return;
+  // ─────────────────────────────────────────────────────────
+  // SOS Cancellation — State Machine Driven
+  // ─────────────────────────────────────────────────────────
 
-    final idToCancel = _activeSosId;
+  Future<void> _cancelSOS() async {
+    final db = DatabaseHelper.instance;
+    final uuidToCancel = _activeLocalUuid;
+    final backendIdToCancel = _activeSosId;
+
+    SosLog.event(
+      uuidToCancel ?? 'unknown',
+      'CANCEL_INITIATED',
+      'backendId=$backendIdToCancel',
+    );
+
+    // ── Immediately reset UI ──
     setState(() {
       _activeSosId = null;
+      _activeLocalUuid = null;
       _sosFired = false;
       _sosHoldTicks = 0;
     });
 
-    try {
-      await widget.api.put('/api/v1/sos/$idToCancel/cancel');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('SOS Cancelled. You are marked as safe.'),
-            backgroundColor: AppColors.primaryGreen,
-            duration: Duration(seconds: 3),
+    // Clear persisted ID
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('active_sos_id');
+
+    // ── Update SQLite atomically ──
+    if (uuidToCancel != null) {
+      await db.atomicUpdateIncident(uuidToCancel, status: SosStatus.cancelled);
+      SosLog.event(uuidToCancel, 'CANCEL_SQLITE', 'status=cancelled');
+    }
+
+    // ── Case 1: Has backend ID — cancel on server ──
+    if (backendIdToCancel != null) {
+      try {
+        await widget.api.put('/api/v1/sos/$backendIdToCancel/cancel');
+        SosLog.event(
+          uuidToCancel ?? 'unknown',
+          'CANCEL_SERVER',
+          'backendId=$backendIdToCancel',
+        );
+        // Mark cancellation as synced
+        if (uuidToCancel != null) {
+          await db.markCancellationSynced(uuidToCancel);
+        }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.white),
+                  SizedBox(width: 12),
+                  Text('SOS Cancelled. You are marked as safe.'),
+                ],
+              ),
+              backgroundColor: AppColors.primaryGreen,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      } catch (e) {
+        SosLog.event(
+          uuidToCancel ?? 'unknown',
+          'CANCEL_SERVER_FAIL',
+          'Will retry on reconnect. error=$e',
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'SOS cancelled locally. Server will be notified when online.',
+              ),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+      return;
+    }
+
+    // ── Case 2: No backend ID (offline SOS) — already cancelled in SQLite ──
+    SosLog.event(
+      uuidToCancel ?? 'unknown',
+      'CANCEL_OFFLINE',
+      'No backend ID — local record cancelled. Will not sync.',
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 12),
+              Text('Offline SOS cancelled. No data sent.'),
+            ],
           ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to cancel SOS. Retrying...')),
-        );
-      }
+          backgroundColor: AppColors.primaryGreen,
+          duration: Duration(seconds: 3),
+        ),
+      );
     }
   }
+
+  // ─────────────────────────────────────────────────────────
+  // Build Methods
+  // ─────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -253,58 +453,162 @@ class _UserHomeTabState extends State<UserHomeTab>
   }
 
   Widget _buildEmergencySOSButton() {
-    // If we have an active SOS, show the cancellation UI instead
+    final double progress = (_sosHoldTicks / 50.0).clamp(0.0, 1.0);
+
+    // If we have an active SOS, show the cancellation UI with HOLD mechanism
     if (_activeSosId != null || _sosFired) {
-      return InkWell(
-        onTap: _cancelSOS,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-          decoration: BoxDecoration(
-            color: AppColors.primaryGreen,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.primaryGreen.withOpacity(0.4),
-                blurRadius: 15,
-                spreadRadius: 2,
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.verified_user, color: Colors.white, size: 36),
-              const SizedBox(width: 16),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text(
-                    'I AM SAFE',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 20,
-                      letterSpacing: 2,
-                    ),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'Tap to cancel SOS broadcast',
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
+      return Column(
+        children: [
+          GestureDetector(
+            onTapDown: (_) {
+              _sosHoldTicks = 0;
+              _sosHoldTimer = Timer.periodic(
+                const Duration(milliseconds: 100),
+                (timer) {
+                  setState(() {
+                    _sosHoldTicks++;
+                    if (_sosHoldTicks >= 50) {
+                      _sosHoldTimer?.cancel();
+                      _cancelSOS();
+                    }
+                  });
+                },
+              );
+            },
+            onTapUp: (_) => _cancelHold(),
+            onTapCancel: () => _cancelHold(),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+              decoration: BoxDecoration(
+                color: AppColors.criticalRed,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.criticalRed.withOpacity(0.4),
+                    blurRadius: 15,
+                    spreadRadius: 2,
                   ),
                 ],
               ),
-            ],
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  if (_sosHoldTicks > 0)
+                    Positioned.fill(
+                      child: FractionallySizedBox(
+                        alignment: Alignment.centerLeft,
+                        widthFactor: progress,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                      ),
+                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.emergency,
+                        color: Colors.white,
+                        size: 36,
+                      ),
+                      const SizedBox(width: 16),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _sosHoldTicks > 0 ? 'RELEASING...' : 'SOS ACTIVE',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 20,
+                              letterSpacing: 2,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _sosHoldTicks > 0
+                                ? 'Release in ${(5.0 - (_sosHoldTicks / 10)).toStringAsFixed(1)}s'
+                                : 'Hold for 5 sec to cancel the SOS',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
+          // ── Live Sync Status Strip ──
+          ValueListenableBuilder<SosSyncStatus>(
+            valueListenable: SosSyncEngine.instance.syncStatusNotifier,
+            builder: (context, status, _) {
+              if (status.phase == SosSyncPhase.idle) {
+                // If SOS is active but synced, show confirmation
+                if (_activeSosId != null) {
+                  return _SyncStatusStrip(
+                    icon: Icons.check_circle,
+                    color: AppColors.primaryGreen,
+                    message: 'SOS delivered to all responders',
+                  );
+                }
+                // Active but not synced yet, waiting for connectivity
+                return _SyncStatusStrip(
+                  icon: Icons.wifi_off,
+                  color: Colors.orange,
+                  message: 'Offline — waiting for connection...',
+                  showPulse: true,
+                );
+              }
+
+              switch (status.phase) {
+                case SosSyncPhase.connecting:
+                  return _SyncStatusStrip(
+                    icon: Icons.sync,
+                    color: Colors.orange,
+                    message: status.message,
+                    showPulse: true,
+                  );
+                case SosSyncPhase.syncing:
+                  return _SyncStatusStrip(
+                    icon: Icons.cloud_upload,
+                    color: Colors.blue,
+                    message: status.message,
+                    showPulse: true,
+                  );
+                case SosSyncPhase.waitingRetry:
+                  return _SyncStatusStrip(
+                    icon: Icons.timer,
+                    color: Colors.orange,
+                    message: status.message,
+                    showPulse: true,
+                  );
+                case SosSyncPhase.synced:
+                  return _SyncStatusStrip(
+                    icon: Icons.check_circle,
+                    color: AppColors.primaryGreen,
+                    message: status.message,
+                  );
+                case SosSyncPhase.failed:
+                  return _SyncStatusStrip(
+                    icon: Icons.error,
+                    color: AppColors.criticalRed,
+                    message: status.message,
+                  );
+                default:
+                  return const SizedBox.shrink();
+              }
+            },
+          ),
+        ],
       );
     }
-
-    final double progress = (_sosHoldTicks / 50.0).clamp(
-      0.0,
-      1.0,
-    ); // 5 sec = 50 ticks of 100ms
 
     return GestureDetector(
       onTapDown: (_) {
@@ -343,7 +647,6 @@ class _UserHomeTabState extends State<UserHomeTab>
         child: Stack(
           alignment: Alignment.center,
           children: [
-            // Background fill bar for holding
             if (!_sosFired && _sosHoldTicks > 0)
               Positioned.fill(
                 child: FractionallySizedBox(
@@ -402,7 +705,6 @@ class _UserHomeTabState extends State<UserHomeTab>
   }
 
   void _cancelHold() {
-    if (_sosFired) return;
     _sosHoldTimer?.cancel();
     setState(() {
       _sosHoldTicks = 0;
@@ -427,7 +729,6 @@ class _UserHomeTabState extends State<UserHomeTab>
             ),
             MarkerLayer(
               markers: [
-                // Render our own position if available
                 if (_position != null)
                   Marker(
                     point: center,
@@ -447,11 +748,10 @@ class _UserHomeTabState extends State<UserHomeTab>
                       ),
                     ),
                   ),
-                // Render all active global SOS waves
                 ..._globalActiveSos.entries.map((entry) {
                   return Marker(
                     point: entry.value,
-                    width: 100, // Large bounds for the radar waves
+                    width: 100,
                     height: 100,
                     child: const _PulsingMarkerWidget(),
                   );
@@ -738,15 +1038,16 @@ class _PulsingMarkerWidget extends StatefulWidget {
   State<_PulsingMarkerWidget> createState() => _PulsingMarkerWidgetState();
 }
 
-class _PulsingMarkerWidgetState extends State<_PulsingMarkerWidget> with SingleTickerProviderStateMixin {
+class _PulsingMarkerWidgetState extends State<_PulsingMarkerWidget>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
 
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(
-        vsync: this,
-        duration: const Duration(seconds: 2),
+      vsync: this,
+      duration: const Duration(seconds: 2),
     )..repeat();
   }
 
@@ -764,25 +1065,20 @@ class _PulsingMarkerWidgetState extends State<_PulsingMarkerWidget> with SingleT
         return Stack(
           alignment: Alignment.center,
           children: [
-            // Wave Ring 1
             Transform.scale(
               scale: _controller.value * 2.0,
               child: Opacity(
                 opacity: 1.0 - _controller.value,
                 child: Container(
-                  width: 30, // base size
+                  width: 30,
                   height: 30,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(
-                      color: AppColors.criticalRed,
-                      width: 2,
-                    ),
+                    border: Border.all(color: AppColors.criticalRed, width: 2),
                   ),
                 ),
               ),
             ),
-            // Wave Ring 2 (delayed offset)
             Transform.scale(
               scale: ((_controller.value + 0.5) % 1.0) * 2.0,
               child: Opacity(
@@ -792,15 +1088,11 @@ class _PulsingMarkerWidgetState extends State<_PulsingMarkerWidget> with SingleT
                   height: 30,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(
-                      color: AppColors.criticalRed,
-                      width: 2,
-                    ),
+                    border: Border.all(color: AppColors.criticalRed, width: 2),
                   ),
                 ),
               ),
             ),
-            // Solid center pin
             Container(
               width: 16,
               height: 16,
@@ -810,6 +1102,100 @@ class _PulsingMarkerWidgetState extends State<_PulsingMarkerWidget> with SingleT
               ),
             ),
           ],
+        );
+      },
+    );
+  }
+}
+
+/// Compact status strip shown below the SOS button during sync activity.
+class _SyncStatusStrip extends StatelessWidget {
+  const _SyncStatusStrip({
+    required this.icon,
+    required this.color,
+    required this.message,
+    this.showPulse = false,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String message;
+  final bool showPulse;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (showPulse) _PulsingDot(color: color),
+        ],
+      ),
+    );
+  }
+}
+
+/// Small pulsing dot to indicate active background activity.
+class _PulsingDot extends StatefulWidget {
+  const _PulsingDot({required this.color});
+  final Color color;
+
+  @override
+  State<_PulsingDot> createState() => _PulsingDotState();
+}
+
+class _PulsingDotState extends State<_PulsingDot>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Opacity(
+          opacity: 0.3 + (_controller.value * 0.7),
+          child: Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: widget.color,
+              shape: BoxShape.circle,
+            ),
+          ),
         );
       },
     );
