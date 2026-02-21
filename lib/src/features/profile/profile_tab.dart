@@ -156,10 +156,11 @@ class _ProfileTabState extends State<ProfileTab> {
             final imageUrl = clerkUser?.imageUrl;
 
             return Card(
+              elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
+                side: BorderSide(color: Colors.grey.shade200),
               ),
-              elevation: 3,
               child: Padding(
                 padding: const EdgeInsets.all(20),
                 child: Column(
@@ -198,10 +199,17 @@ class _ProfileTabState extends State<ProfileTab> {
                                   ? Colors.orange
                                   : AppColors.primaryGreen)
                               .withValues(alpha: 0.1),
+                      side: BorderSide.none,
                       label: Text(
                         (widget.user.isUser ? 'CITIZEN' : widget.user.role)
                             .toUpperCase(),
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
+                          color: widget.user.isUser
+                              ? Colors.deepOrange
+                              : AppColors.primaryGreen,
+                        ),
                       ),
                     ),
                   ],
@@ -214,66 +222,88 @@ class _ProfileTabState extends State<ProfileTab> {
 
         const SizedBox(height: 16),
 
-        // Health & Contact Card
-        Card(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Health & Contact',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
+        if (widget.user.isUser) ...[
+          // Health & Contact Card for Citizen
+          Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: BorderSide(color: Colors.grey.shade200),
+            ),
+            child: Theme(
+              data: Theme.of(
+                context,
+              ).copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                initiallyExpanded: false,
+                leading: const Icon(
+                  Icons.health_and_safety,
+                  color: AppColors.primaryGreen,
+                ),
+                title: const Text(
+                  'Health & Contact Details',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: const Text(
+                  'Update info for emergency responders',
+                  style: TextStyle(fontSize: 12),
+                ),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Divider(),
+                        const SizedBox(height: 12),
+                        _buildProfileField(
+                          label: 'Blood Group',
+                          controller: _bloodCtrl,
+                          icon: Icons.bloodtype,
+                          hint: 'e.g. O+',
+                        ),
+                        const SizedBox(height: 12),
+                        _buildProfileField(
+                          label: 'Address',
+                          controller: _addrCtrl,
+                          icon: Icons.home,
+                          hint: 'Full physical address',
+                        ),
+                        const SizedBox(height: 12),
+                        _buildProfileField(
+                          label: 'Medical History',
+                          controller: _medCtrl,
+                          icon: Icons.medical_services,
+                          hint: 'Allergies, chronic conditions...',
+                          maxLines: 3,
+                        ),
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: _busy ? null : _updateUserDetails,
+                            icon: const Icon(Icons.save, size: 18),
+                            label: const Text('Save Details'),
+                          ),
+                        ),
+                      ],
                     ),
-                    TextButton.icon(
-                      onPressed: _busy ? null : _updateUserDetails,
-                      icon: const Icon(Icons.save, size: 18),
-                      label: const Text('Save'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                _buildProfileField(
-                  label: 'Blood Group',
-                  controller: _bloodCtrl,
-                  icon: Icons.bloodtype,
-                  hint: 'e.g. O+',
-                ),
-                const SizedBox(height: 12),
-                _buildProfileField(
-                  label: 'Address',
-                  controller: _addrCtrl,
-                  icon: Icons.home,
-                  hint: 'Full physical address',
-                ),
-                const SizedBox(height: 12),
-                _buildProfileField(
-                  label: 'Medical History',
-                  controller: _medCtrl,
-                  icon: Icons.medical_services,
-                  hint: 'Allergies, chronic conditions...',
-                  maxLines: 3,
-                ),
-              ],
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
+          const SizedBox(height: 16),
+        ],
 
         const SizedBox(height: 16),
 
         if (isVolunteer)
           Card(
+            elevation: 0,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
+              side: BorderSide(color: Colors.grey.shade200),
             ),
             child: Column(
               children: [
@@ -320,8 +350,10 @@ class _ProfileTabState extends State<ProfileTab> {
           )
         else if (!widget.user.isUser)
           Card(
+            elevation: 0,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
+              side: BorderSide(color: Colors.grey.shade200),
             ),
             child: const Padding(
               padding: EdgeInsets.all(16),
@@ -334,8 +366,10 @@ class _ProfileTabState extends State<ProfileTab> {
         const SizedBox(height: 16),
 
         Card(
+          elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: Colors.grey.shade200),
           ),
           child: ExpansionTile(
             leading: const Icon(Icons.account_circle),
