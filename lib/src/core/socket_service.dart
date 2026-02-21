@@ -11,7 +11,12 @@ class SocketService {
   IO.Socket? _socket;
 
   // Let the UI know there's a new SOS so it can trigger a board refresh
-  final ValueNotifier<int> onNewSosAlert = ValueNotifier(0);
+  final ValueNotifier<Map<String, dynamic>?> onNewSosAlert = ValueNotifier(
+    null,
+  );
+  final ValueNotifier<Map<String, dynamic>?> onSosResolved = ValueNotifier(
+    null,
+  );
 
   void initialize(BuildContext context, bool isCoordinatorOrAdmin) {
     if (_socket != null) return;
@@ -27,8 +32,8 @@ class SocketService {
     });
 
     _socket!.on('new_sos_alert', (data) {
-      if (isCoordinatorOrAdmin && context.mounted) {
-        // Show a highly visible red toast
+      if (context.mounted) {
+        // Show a highly visible red toast for ALL users
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Row(
@@ -51,8 +56,16 @@ class SocketService {
           ),
         );
 
-        // Trigger a reload for any listening active boards
-        onNewSosAlert.value++;
+        // Trigger a reload for any listening active boards & map
+        if (data is Map<String, dynamic>) {
+          onNewSosAlert.value = data;
+        }
+      }
+    });
+
+    _socket!.on('sos_resolved', (data) {
+      if (data is Map<String, dynamic>) {
+        onSosResolved.value = data;
       }
     });
 

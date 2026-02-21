@@ -9,7 +9,7 @@ import '../../core/location_service.dart';
 import '../../core/models.dart';
 import '../../theme/app_colors.dart';
 import '../../core/database_helper.dart';
-import '../../core/connectivity_service.dart';
+import '../../core/socket_service.dart';
 
 class UserHomeTab extends StatefulWidget {
   const UserHomeTab({super.key, required this.api, required this.user});
@@ -34,6 +34,10 @@ class _UserHomeTabState extends State<UserHomeTab>
   Timer? _sosHoldTimer;
   int _sosHoldTicks = 0;
   bool _sosFired = false;
+  String? _activeSosId;
+
+  // Track global SOS from sockets: {id: LatLng}
+  final Map<String, LatLng> _globalActiveSos = {};
 
   @override
   void initState() {
@@ -42,12 +46,49 @@ class _UserHomeTabState extends State<UserHomeTab>
     _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) _load(silent: true);
     });
+
+    SocketService.instance.onNewSosAlert.addListener(_onRemoteSosReceived);
+    SocketService.instance.onSosResolved.addListener(_onRemoteSosResolved);
+  }
+
+  void _onRemoteSosReceived() {
+    final payload = SocketService.instance.onNewSosAlert.value;
+    if (payload == null) return;
+
+    final locRaw = payload['location'];
+    if (locRaw is Map<String, dynamic> && locRaw['coordinates'] is List) {
+      final coords = locRaw['coordinates'];
+      if (coords.length >= 2) {
+        final id = payload['id'].toString();
+        // Skip our own SOS since we center on it anyway
+        if (id == _activeSosId) return;
+
+        setState(() {
+          _globalActiveSos[id] = LatLng(
+            (coords[1] as num).toDouble(), // Lat
+            (coords[0] as num).toDouble(), // Lng
+          );
+        });
+      }
+    }
+  }
+
+  void _onRemoteSosResolved() {
+    final payload = SocketService.instance.onSosResolved.value;
+    if (payload == null) return;
+
+    final id = payload['id'].toString();
+    setState(() {
+      _globalActiveSos.remove(id);
+    });
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
     _sosHoldTimer?.cancel();
+    SocketService.instance.onNewSosAlert.removeListener(_onRemoteSosReceived);
+    SocketService.instance.onSosResolved.removeListener(_onRemoteSosResolved);
     super.dispose();
   }
 
@@ -89,28 +130,73 @@ class _UserHomeTabState extends State<UserHomeTab>
   bool get wantKeepAlive => true;
 
   Future<void> _triggerSOS() async {
-    // Save to local SQLite immediately
+    // 1. Save locally for offline resilience
     final incident = {
       'reporter_id': widget.user.id,
       'location_lat': _position?.latitude,
       'location_lng': _position?.longitude,
       'captured_at': DateTime.now().toIso8601String(),
     };
-
     await DatabaseHelper.instance.insertIncident(incident);
+
+    // 2. Try to sync immediately to get the real ID, so we can cancel it later
+    try {
+      final res = await widget.api.post(
+        '/api/v1/sos',
+        body: {
+          'lat': _position?.latitude ?? 18.5204,
+          'lng': _position?.longitude ?? 73.8567,
+          'type': 'Emergency',
+        },
+      );
+      if (mounted && res is Map<String, dynamic> && res['id'] != null) {
+        setState(() {
+          _activeSosId = res['id'].toString();
+        });
+      }
+    } catch (_) {
+      // If offline, background sync will handle it, but we can't cancel until it syncs
+    }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('SOS Activated! Saved locally.'),
+          content: Text('SOS Activated! Broadcasting...'),
           backgroundColor: AppColors.criticalRed,
           duration: Duration(seconds: 2),
         ),
       );
     }
+  }
 
-    // Try background sync
-    await ConnectivityService.instance.syncOfflineIncidents();
+  Future<void> _cancelSOS() async {
+    if (_activeSosId == null) return;
+
+    final idToCancel = _activeSosId;
+    setState(() {
+      _activeSosId = null;
+      _sosFired = false;
+      _sosHoldTicks = 0;
+    });
+
+    try {
+      await widget.api.put('/api/v1/sos/$idToCancel/cancel');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('SOS Cancelled. You are marked as safe.'),
+            backgroundColor: AppColors.primaryGreen,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to cancel SOS. Retrying...')),
+        );
+      }
+    }
   }
 
   @override
@@ -167,6 +253,54 @@ class _UserHomeTabState extends State<UserHomeTab>
   }
 
   Widget _buildEmergencySOSButton() {
+    // If we have an active SOS, show the cancellation UI instead
+    if (_activeSosId != null || _sosFired) {
+      return InkWell(
+        onTap: _cancelSOS,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+          decoration: BoxDecoration(
+            color: AppColors.primaryGreen,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.primaryGreen.withOpacity(0.4),
+                blurRadius: 15,
+                spreadRadius: 2,
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.verified_user, color: Colors.white, size: 36),
+              const SizedBox(width: 16),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text(
+                    'I AM SAFE',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 20,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Tap to cancel SOS broadcast',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final double progress = (_sosHoldTicks / 50.0).clamp(
       0.0,
       1.0,
@@ -194,7 +328,7 @@ class _UserHomeTabState extends State<UserHomeTab>
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
         decoration: BoxDecoration(
-          color: _sosFired ? AppColors.criticalRed : Colors.white,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.criticalRed, width: 2),
           boxShadow: [
@@ -226,19 +360,19 @@ class _UserHomeTabState extends State<UserHomeTab>
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
+                const Icon(
                   Icons.emergency,
-                  color: _sosFired ? Colors.white : AppColors.criticalRed,
+                  color: AppColors.criticalRed,
                   size: 36,
                 ),
                 const SizedBox(width: 16),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      _sosFired ? 'SOS TRIGGERED' : 'HOLD FOR SOS',
+                    const Text(
+                      'HOLD FOR SOS',
                       style: TextStyle(
-                        color: _sosFired ? Colors.white : AppColors.criticalRed,
+                        color: AppColors.criticalRed,
                         fontWeight: FontWeight.bold,
                         fontSize: 20,
                         letterSpacing: 2,
@@ -246,13 +380,11 @@ class _UserHomeTabState extends State<UserHomeTab>
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      _sosFired
-                          ? 'Help request dispatched'
-                          : (_sosHoldTicks > 0)
+                      (_sosHoldTicks > 0)
                           ? 'Holding... ${(5.0 - (_sosHoldTicks / 10)).toStringAsFixed(1)}s'
                           : 'Hold for 5 seconds to request help',
                       style: TextStyle(
-                        color: _sosFired ? Colors.white : Colors.black54,
+                        color: Colors.black54,
                         fontSize: 12,
                         fontWeight: _sosHoldTicks > 0
                             ? FontWeight.bold
@@ -293,9 +425,10 @@ class _UserHomeTabState extends State<UserHomeTab>
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.example.sahyog_app',
             ),
-            if (_position != null)
-              MarkerLayer(
-                markers: [
+            MarkerLayer(
+              markers: [
+                // Render our own position if available
+                if (_position != null)
                   Marker(
                     point: center,
                     width: 40,
@@ -314,8 +447,17 @@ class _UserHomeTabState extends State<UserHomeTab>
                       ),
                     ),
                   ),
-                ],
-              ),
+                // Render all active global SOS waves
+                ..._globalActiveSos.entries.map((entry) {
+                  return Marker(
+                    point: entry.value,
+                    width: 100, // Large bounds for the radar waves
+                    height: 100,
+                    child: const _PulsingMarkerWidget(),
+                  );
+                }),
+              ],
+            ),
           ],
         ),
         Positioned(
@@ -585,6 +727,91 @@ class _Tag extends StatelessWidget {
           fontWeight: FontWeight.bold,
         ),
       ),
+    );
+  }
+}
+
+class _PulsingMarkerWidget extends StatefulWidget {
+  const _PulsingMarkerWidget();
+
+  @override
+  State<_PulsingMarkerWidget> createState() => _PulsingMarkerWidgetState();
+}
+
+class _PulsingMarkerWidgetState extends State<_PulsingMarkerWidget> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+        vsync: this,
+        duration: const Duration(seconds: 2),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            // Wave Ring 1
+            Transform.scale(
+              scale: _controller.value * 2.0,
+              child: Opacity(
+                opacity: 1.0 - _controller.value,
+                child: Container(
+                  width: 30, // base size
+                  height: 30,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: AppColors.criticalRed,
+                      width: 2,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // Wave Ring 2 (delayed offset)
+            Transform.scale(
+              scale: ((_controller.value + 0.5) % 1.0) * 2.0,
+              child: Opacity(
+                opacity: 1.0 - ((_controller.value + 0.5) % 1.0),
+                child: Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: AppColors.criticalRed,
+                      width: 2,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // Solid center pin
+            Container(
+              width: 16,
+              height: 16,
+              decoration: const BoxDecoration(
+                color: AppColors.criticalRed,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
