@@ -1,66 +1,51 @@
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'sos_sync_engine.dart';
+import 'sos_state_machine.dart';
 import 'api_client.dart';
-import 'database_helper.dart';
 
+/// Listens to connectivity changes and delegates SOS sync to [SosSyncEngine].
+///
+/// This service is the bridge between the OS-level connectivity events
+/// and the mutex-locked sync engine. It does NOT contain any sync logic itself.
 class ConnectivityService {
   static final ConnectivityService instance = ConnectivityService._internal();
-
   ConnectivityService._internal();
 
   final Connectivity _connectivity = Connectivity();
   StreamSubscription<List<ConnectivityResult>>? _subscription;
-  ApiClient? _api;
+  Timer? _periodicSync;
 
   void initialize(ApiClient api) {
-    _api = api;
-    // Listen to network changes
+    // Initialize the sync engine with the API client
+    SosSyncEngine.instance.initialize(api);
+
+    // Listen to connectivity changes
     _subscription = _connectivity.onConnectivityChanged.listen(
       _handleConnectionChange,
     );
+
+    // Periodic fallback: every 30s, try syncing stuck records
+    _periodicSync = Timer.periodic(const Duration(seconds: 30), (_) {
+      SosSyncEngine.instance.syncAll();
+    });
   }
 
   void dispose() {
     _subscription?.cancel();
+    _periodicSync?.cancel();
   }
 
   Future<void> _handleConnectionChange(List<ConnectivityResult> results) async {
-    // If we have any connection (WiFi, Mobile, etc), try syncing
     if (results.any((r) => r != ConnectivityResult.none)) {
-      await syncOfflineIncidents();
+      SosLog.warn('CONNECTIVITY', 'Connection restored — triggering sync');
+      // Small delay to let the connection stabilize
+      await Future.delayed(const Duration(seconds: 2));
+      await SosSyncEngine.instance.syncAll();
     }
   }
 
-  /// Manually callable to push all pending SQLite SOS incidents to the backend
-  Future<void> syncOfflineIncidents() async {
-    if (_api == null) return;
-
-    final db = DatabaseHelper.instance;
-    final pending = await db.getPendingIncidents();
-
-    if (pending.isEmpty) return;
-
-    for (var incident in pending) {
-      try {
-        // Construct the payload for the backend
-        final body = <String, dynamic>{};
-        if (incident['location_lat'] != null &&
-            incident['location_lng'] != null) {
-          body['location'] = {
-            'lat': incident['location_lat'],
-            'lng': incident['location_lng'],
-          };
-        }
-
-        // Push to server
-        await _api!.post('/api/v1/sos', body: body);
-
-        // Mark as synced locally
-        await db.markIncidentSynced(incident['id'] as int);
-      } catch (e) {
-        // If it fails (e.g., server down or token expired), we leave it pending to try again later
-        print('Failed to sync offline SOS incident ${incident['id']}: $e');
-      }
-    }
-  }
+  /// Expose the sync completion notifier for backward compatibility
+  /// (UserHomeTab listens to this)
+  get syncCompletionNotifier => SosSyncEngine.instance.syncCompletionNotifier;
 }
