@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/material.dart';
 import '../../core/api_client.dart';
 import '../../core/ble_payload_codec.dart';
 import '../../core/ble_scanner_service.dart';
