@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:clerk_auth/clerk_auth.dart' as clerk;
 import 'package:clerk_flutter/clerk_flutter.dart';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/api_client.dart';
 import '../../core/app_config.dart';
@@ -24,6 +25,7 @@ import '../missing/missing_tab.dart';
 import '../notifications/notifications_tab.dart';
 import '../profile/profile_tab.dart';
 import 'user_profile_completion_screen.dart';
+import '../home/global_mesh_overlay.dart';
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key, required this.authState});
@@ -90,6 +92,18 @@ class _AuthGateState extends State<AuthGate> {
       } catch (_) {}
 
       if (!mounted) return;
+
+      // Request permissions required for BLE Mesh P2P
+      try {
+        await [
+          Permission.bluetoothScan,
+          Permission.bluetoothAdvertise,
+          Permission.bluetoothConnect,
+          Permission.location,
+        ].request();
+      } catch (e) {
+        print('Error requesting BLE permissions: $e');
+      }
 
       // Initialize background offline SOS sync
       ConnectivityService.instance.initialize(_api);
@@ -162,7 +176,9 @@ class _AuthGateState extends State<AuthGate> {
       );
     }
 
-    return RoleBasedAppShell(api: _api, user: _user!, onRefresh: _bootstrap);
+    return GlobalMeshOverlay(
+      child: RoleBasedAppShell(api: _api, user: _user!, onRefresh: _bootstrap),
+    );
   }
 }
 

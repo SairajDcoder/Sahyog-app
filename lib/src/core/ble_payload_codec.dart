@@ -141,9 +141,9 @@ class BlePayloadCodec {
     final timestamp = buffer.getUint32(10, Endian.little);
     final uuidHash = buffer.getUint32(14, Endian.little);
 
-    // Timestamp freshness check (reject beacons older than 1 hour)
+    // Timestamp freshness check (reject beacons older than 24 hours to prevent timezone/drift issues)
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    if ((now - timestamp).abs() > 3600) return null;
+    if ((now - timestamp).abs() > 86400) return null;
 
     return BleBeacon(
       flag: flag,

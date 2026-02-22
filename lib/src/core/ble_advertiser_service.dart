@@ -87,6 +87,7 @@ class BleAdvertiserService {
       final advertiseData = AdvertiseData(
         manufacturerId: kSahyogManufacturerId,
         manufacturerData: payload,
+        includeDeviceName: false,
       );
 
       final advertiseSettings = AdvertiseSettings(
@@ -160,6 +161,7 @@ class BleAdvertiserService {
       final advertiseData = AdvertiseData(
         manufacturerId: kSahyogManufacturerId,
         manufacturerData: payload,
+        includeDeviceName: false,
       );
 
       final advertiseSettings = AdvertiseSettings(
@@ -203,6 +205,7 @@ class BleAdvertiserService {
       final advertiseData = AdvertiseData(
         manufacturerId: kSahyogManufacturerId,
         manufacturerData: payload,
+        includeDeviceName: false,
       );
 
       final advertiseSettings = AdvertiseSettings(

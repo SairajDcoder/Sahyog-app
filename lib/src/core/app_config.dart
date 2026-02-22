@@ -5,6 +5,7 @@ class AppConfig {
 
   // Local Network Server for physical device testing
   static const productionUrl = 'http://172.25.96.235:3000';
+  // static const productionUrl = 'https://sahyog-server-gnij.onrender.com';
 
   // Android emulator reaches host machine via 10.0.2.2.
   static const androidBaseUrl = 'http://10.0.2.2:3000';
