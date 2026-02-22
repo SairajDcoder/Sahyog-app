@@ -132,9 +132,6 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -144,50 +141,62 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
           const SizedBox(height: 8),
           _RoleChip(role: widget.user.role),
           const SizedBox(height: 16),
-          if (_error.isNotEmpty)
-            Text(_error, style: const TextStyle(color: AppColors.criticalRed)),
-          Card(
-            clipBehavior: Clip.antiAlias,
-            child: SizedBox(height: 200, child: _buildMiniMap()),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Recent Tasks',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 8),
-          if (_recentTasks.isEmpty)
-            const Card(
+          if (_loading && _recentTasks.isEmpty && _zones.isEmpty)
+            const Center(
               child: Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('No recent tasks found.'),
+                padding: EdgeInsets.all(32.0),
+                child: CircularProgressIndicator(),
               ),
             )
-          else
-            ..._recentTasks.map((task) {
-              final title = (task['title'] ?? task['type'] ?? 'Task')
-                  .toString();
-              final status = (task['status'] ?? 'pending').toString();
-              final desc = (task['description'] ?? '').toString();
-              return Card(
-                child: ListTile(
-                  leading: const CircleAvatar(
-                    backgroundColor: AppColors.primaryGreen,
-                    foregroundColor: Colors.white,
-                    child: Icon(Icons.assignment_turned_in),
-                  ),
-                  title: Text(title),
-                  subtitle: Text(
-                    desc.isEmpty ? 'No description' : desc,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  trailing: Chip(label: Text(status.toUpperCase())),
+          else ...[
+            if (_error.isNotEmpty)
+              Text(
+                _error,
+                style: const TextStyle(color: AppColors.criticalRed),
+              ),
+            Card(
+              clipBehavior: Clip.antiAlias,
+              child: SizedBox(height: 200, child: _buildMiniMap()),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Recent Tasks',
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            if (_recentTasks.isEmpty)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('No recent tasks found.'),
                 ),
-              );
-            }),
+              )
+            else
+              ..._recentTasks.map((task) {
+                final title = (task['title'] ?? task['type'] ?? 'Task')
+                    .toString();
+                final status = (task['status'] ?? 'pending').toString();
+                final desc = (task['description'] ?? '').toString();
+                return Card(
+                  child: ListTile(
+                    leading: const CircleAvatar(
+                      backgroundColor: AppColors.primaryGreen,
+                      foregroundColor: Colors.white,
+                      child: Icon(Icons.assignment_turned_in),
+                    ),
+                    title: Text(title),
+                    subtitle: Text(
+                      desc.isEmpty ? 'No description' : desc,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: Chip(label: Text(status.toUpperCase())),
+                  ),
+                );
+              }),
+          ],
         ],
       ),
     );

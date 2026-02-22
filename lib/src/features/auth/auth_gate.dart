@@ -22,6 +22,7 @@ import '../home/user_home_tab.dart';
 import '../home/global_sos_indicator.dart';
 import '../map/map_tab.dart';
 import '../missing/missing_tab.dart';
+
 import '../notifications/notifications_tab.dart';
 import '../profile/profile_tab.dart';
 import 'user_profile_completion_screen.dart';
@@ -225,7 +226,7 @@ class _UserAppShellState extends State<UserAppShell> {
   int _index = 0;
   final ValueNotifier<int> _refreshNotifier = ValueNotifier(0);
 
-  static const _titles = ['Dashboard', 'Map', 'Missing', 'Profile'];
+  static const _titles = ['Dashboard', 'Map', 'Missing Persons', 'Profile'];
 
   @override
   Widget build(BuildContext context) {
@@ -240,7 +241,7 @@ class _UserAppShellState extends State<UserAppShell> {
         api: widget.api,
       ),
       MissingTab(
-        key: ValueKey('u_missing_${_index}_${_refreshNotifier.value}'),
+        key: ValueKey('u_miss_${_index}_${_refreshNotifier.value}'),
         api: widget.api,
       ),
       ProfileTab(
@@ -313,8 +314,8 @@ class _UserAppShellState extends State<UserAppShell> {
             label: 'Map',
           ),
           NavigationDestination(
-            icon: Icon(Icons.people_alt_outlined),
-            selectedIcon: Icon(Icons.people_alt),
+            icon: Icon(Icons.person_search_outlined),
+            selectedIcon: Icon(Icons.person_search),
             label: 'Missing',
           ),
           NavigationDestination(
@@ -342,14 +343,7 @@ class _GeneralAppShellState extends State<GeneralAppShell> {
   int _index = 0;
   final ValueNotifier<int> _refreshNotifier = ValueNotifier(0);
 
-  static const _titles = [
-    'Dashboard',
-    'Map',
-    'Missing',
-    'SOS',
-    'Tasks',
-    'Profile',
-  ];
+  static const _titles = ['Dashboard', 'Map', 'SOS', 'Tasks', 'Profile'];
 
   @override
   Widget build(BuildContext context) {
@@ -361,10 +355,6 @@ class _GeneralAppShellState extends State<GeneralAppShell> {
       ),
       MapTab(
         key: ValueKey('map_${_index}_${_refreshNotifier.value}'),
-        api: widget.api,
-      ),
-      MissingTab(
-        key: ValueKey('missing_${_index}_${_refreshNotifier.value}'),
         api: widget.api,
       ),
       CombinedSosTab(
@@ -434,7 +424,7 @@ class _GeneralAppShellState extends State<GeneralAppShell> {
       ),
       floatingActionButton: GlobalSosIndicator(
         onTap: () {
-          setState(() => _index = 3); // Switch to SOS Tab
+          setState(() => _index = 2); // Switch to SOS Tab
         },
       ),
       bottomNavigationBar: NavigationBar(
@@ -450,11 +440,6 @@ class _GeneralAppShellState extends State<GeneralAppShell> {
             icon: Icon(Icons.map_outlined),
             selectedIcon: Icon(Icons.map),
             label: 'Map',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.people_alt_outlined),
-            selectedIcon: Icon(Icons.people_alt),
-            label: 'Missing',
           ),
           NavigationDestination(
             icon: Icon(Icons.sos_outlined),

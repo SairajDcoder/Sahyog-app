@@ -498,7 +498,6 @@ class _UserHomeTabState extends State<UserHomeTab>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (_loading) return const Center(child: CircularProgressIndicator());
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -509,6 +508,7 @@ class _UserHomeTabState extends State<UserHomeTab>
             children: [
               _UserStatusBanner(user: widget.user),
               const SizedBox(height: 16),
+<<<<<<< HEAD
               Card(
                 clipBehavior: Clip.antiAlias,
                 elevation: 2,
@@ -584,25 +584,53 @@ class _UserHomeTabState extends State<UserHomeTab>
                     Icons.emergency_share_outlined,
                     color: AppColors.criticalRed,
                     size: 20,
+=======
+              if (_loading && _alerts.isEmpty && _position == null)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(48.0),
+                    child: CircularProgressIndicator(),
+>>>>>>> c489dcc (roles ui ussye fixed here)
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Recent Disaster Alerts',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: -0.5,
-                    ),
+                )
+              else ...[
+                Card(
+                  clipBehavior: Clip.antiAlias,
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (_alerts.isEmpty)
-                _EmptyAlertsState()
-              else
-                ..._alerts.map(
-                  (alert) => _AlertCard(alert: alert, api: widget.api),
+                  child: SizedBox(height: 220, child: _buildMiniMap()),
                 ),
-              const SizedBox(height: 32),
+                const SizedBox(height: 16),
+                _buildEmergencySOSButton(),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.emergency_share_outlined,
+                      color: AppColors.criticalRed,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Recent Disaster Alerts',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (_alerts.isEmpty)
+                  _EmptyAlertsState()
+                else
+                  ..._alerts.map(
+                    (alert) => _AlertCard(alert: alert, api: widget.api),
+                  ),
+                const SizedBox(height: 32),
+              ],
             ],
           ),
         ],

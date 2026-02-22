@@ -100,124 +100,78 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
     }
   }
 
-  Future<void> _fetchAndShowLatestSos() async {
-    try {
-      final raw = await widget.api.get('/api/v1/coordinator/sos');
-      final list = (raw is List)
-          ? raw.cast<Map<String, dynamic>>()
-          : <Map<String, dynamic>>[];
-      if (list.isEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No active SOS alerts found.')),
-        );
-        return;
-      }
-      final latest = list.first;
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text(
-            '🆘 Emergency Alert',
-            style: TextStyle(color: AppColors.criticalRed),
-          ),
-          content: Text(
-            'Latest SOS from: ${latest['volunteer_name'] ?? 'Unknown'}\nStatus: ${(latest['status'] ?? '').toString().toUpperCase()}',
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Close'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                widget.onNavigate(3);
-              },
-              child: const Text('View All'),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to check SOS: $e')));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
     return Scaffold(
-      body: RefreshIndicator(
-        onRefresh: _load,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _buildHeader(),
-            const SizedBox(height: 10),
-            if (_error.isNotEmpty)
-              Text(
-                _error,
-                style: const TextStyle(color: AppColors.criticalRed),
+      body: _loading && _ctx.isEmpty
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  _buildHeader(),
+                  const SizedBox(height: 10),
+                  if (_error.isNotEmpty)
+                    Text(
+                      _error,
+                      style: const TextStyle(color: AppColors.criticalRed),
+                    ),
+                  _buildMiniMap(),
+                  const SizedBox(height: 12),
+                  _buildStatsRow(),
+                  const SizedBox(height: 12),
+                  _buildRecentTasks(),
+                  const SizedBox(height: 12),
+                  _buildRecentSos(),
+                  const SizedBox(height: 80), // Padding for FAB
+                ],
               ),
-            _buildMiniMap(),
-            const SizedBox(height: 12),
-            _buildStatsRow(),
-            const SizedBox(height: 12),
-            _buildRecentTasks(),
-            const SizedBox(height: 12),
-            _buildRecentSos(),
-            const SizedBox(height: 80), // Padding for FAB
-          ],
-        ),
-      ),
-      floatingActionButton: Padding(
-        padding: const EdgeInsets.only(right: 12.0),
-        child: AnimatedSosButton(onTrigger: _fetchAndShowLatestSos),
-      ),
+            ),
     );
   }
 
   Widget _buildHeader() {
     return Card(
-      elevation: 0,
+      elevation: 2,
+      shadowColor: Colors.black.withOpacity(0.05),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(30),
-        side: BorderSide(color: Colors.grey.withValues(alpha: 0.3), width: 1),
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: Colors.grey.withOpacity(0.1), width: 1),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Row(
           children: [
             CircleAvatar(
-              backgroundColor: AppColors.primaryGreen,
-              foregroundColor: Colors.white,
+              backgroundColor: AppColors.primaryGreen.withOpacity(0.15),
+              foregroundColor: AppColors.primaryGreen,
+              radius: 18,
               child: Text(
                 widget.user.name.isNotEmpty
                     ? widget.user.name[0].toUpperCase()
                     : '?',
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 14),
             Expanded(
               child: TextField(
                 onChanged: (val) => setState(() => _searchQuery = val),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   hintText: 'Search alerts, tasks...',
+                  hintStyle: TextStyle(
+                    color: Colors.grey.shade400,
+                    fontSize: 14,
+                  ),
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,
                   focusedBorder: InputBorder.none,
+                  isDense: true,
                 ),
               ),
             ),
-            const Icon(Icons.search, color: Colors.grey),
+            Icon(Icons.search, color: Colors.grey.shade400, size: 22),
           ],
         ),
       ),
@@ -255,48 +209,65 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
+      clipBehavior: Clip.none,
       child: Row(
         children: items.map((item) {
-          final (label, value, _, color, tabIndex) = item;
-          return SizedBox(
-            width: 110,
-            child: InkWell(
-              onTap: () => widget.onNavigate(tabIndex),
-              borderRadius: BorderRadius.circular(24),
-              child: Card(
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  side: BorderSide(
-                    color: Colors.grey.withValues(alpha: 0.3),
-                    width: 1,
-                  ),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 16,
-                    horizontal: 8,
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        '$value',
-                        style: TextStyle(
-                          fontSize: 34,
-                          fontWeight: FontWeight.w800,
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                      ),
-                      Text(
-                        label,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey,
-                        ),
-                        maxLines: 1,
+          final (label, value, icon, color, tabIndex) = item;
+          return Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: SizedBox(
+              width: 130,
+              child: InkWell(
+                onTap: () => widget.onNavigate(tabIndex),
+                borderRadius: BorderRadius.circular(20),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.03),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
                       ),
                     ],
+                    border: Border.all(color: Colors.grey.withOpacity(0.1)),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: color.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(icon, color: color, size: 20),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          '$value',
+                          style: TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w800,
+                            color: Theme.of(context).colorScheme.onSurface,
+                            height: 1,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade500,
+                          ),
+                          maxLines: 1,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -318,12 +289,24 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
       }
     }
 
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: Border.all(color: Colors.grey.withOpacity(0.1)),
+      ),
       clipBehavior: Clip.antiAlias,
       child: GestureDetector(
         onLongPress: () => widget.onNavigate(1),
         child: SizedBox(
-          height: 180,
+          height: 200,
           child: Stack(
             children: [
               FlutterMap(
@@ -412,51 +395,125 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
                 status.contains(_searchQuery.toLowerCase());
           }).toList();
 
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: Border.all(color: Colors.grey.withOpacity(0.1)),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Recent Tasks',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Recent Tasks',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward_ios,
+                  size: 14,
+                  color: Colors.grey.shade400,
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             if (filtered.isEmpty)
-              const Text('No tasks.', style: TextStyle(color: Colors.grey))
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.check_circle_outline,
+                      size: 20,
+                      color: Colors.grey[400],
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'No active tasks right now',
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              )
             else
               ...filtered.map((task) {
                 final title = (task['title'] ?? task['type'] ?? 'Task')
                     .toString();
                 final status = (task['status'] ?? 'pending').toString();
+                final isCompleted = status.toLowerCase() == 'completed';
                 return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
                   child: Row(
                     children: [
                       Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: Colors.blueAccent,
+                          color: isCompleted
+                              ? AppColors.primaryGreen
+                              : Colors.blueAccent,
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 16),
                       Expanded(
                         child: Text(
                           title,
-                          style: const TextStyle(fontWeight: FontWeight.w500),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                            color: Colors.black87,
+                            decoration: isCompleted
+                                ? TextDecoration.lineThrough
+                                : null,
+                          ),
                         ),
                       ),
-                      Text(
-                        status.toUpperCase(),
-                        style: const TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey,
-                          fontWeight: FontWeight.bold,
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color:
+                              (isCompleted
+                                      ? AppColors.primaryGreen
+                                      : Colors.blueAccent)
+                                  .withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          status.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: isCompleted
+                                ? AppColors.primaryGreen
+                                : Colors.blueAccent,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
                     ],
@@ -479,50 +536,128 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
                 status.contains(_searchQuery.toLowerCase());
           }).toList();
 
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: Border.all(color: Colors.grey.withOpacity(0.1)),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Recent SOS Alerts',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Recent SOS Alerts',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward_ios,
+                  size: 14,
+                  color: Colors.grey.shade400,
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             if (filtered.isEmpty)
-              const Text('No SOS alerts.', style: TextStyle(color: Colors.grey))
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.verified_user_outlined,
+                      size: 20,
+                      color: Colors.grey[400],
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'No SOS alerts — all clear',
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              )
             else
               ...filtered.map((sos) {
                 final status = (sos['status'] ?? 'triggered').toString();
-                final vol = (sos['volunteer_name'] ?? 'Unknown').toString();
+                final reporterName =
+                    (sos['reporter_name'] ??
+                            sos['reporter_phone'] ??
+                            'Sahayanet User')
+                        .toString();
+                final isResolved = status.toLowerCase() == 'resolved';
                 return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
                   child: Row(
                     children: [
                       Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: AppColors.criticalRed,
+                          color: isResolved
+                              ? AppColors.primaryGreen
+                              : AppColors.criticalRed,
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 16),
                       Expanded(
                         child: Text(
-                          vol,
-                          style: const TextStyle(fontWeight: FontWeight.w500),
+                          reporterName,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                            color: Colors.black87,
+                            decoration: isResolved
+                                ? TextDecoration.lineThrough
+                                : null,
+                          ),
                         ),
                       ),
-                      Text(
-                        status.toUpperCase(),
-                        style: const TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey,
-                          fontWeight: FontWeight.bold,
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color:
+                              (isResolved
+                                      ? AppColors.primaryGreen
+                                      : AppColors.criticalRed)
+                                  .withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          status.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: isResolved
+                                ? AppColors.primaryGreen
+                                : AppColors.criticalRed,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
                     ],
@@ -545,84 +680,14 @@ class _CoordinatorDashboardTabState extends State<CoordinatorDashboardTab> {
         return AppColors.criticalRed;
     }
   }
-}
 
-class AnimatedSosButton extends StatefulWidget {
-  final VoidCallback onTrigger;
-  const AnimatedSosButton({super.key, required this.onTrigger});
-
-  @override
-  State<AnimatedSosButton> createState() => _AnimatedSosButtonState();
-}
-
-class _AnimatedSosButtonState extends State<AnimatedSosButton>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  bool _isPressed = false;
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 1),
-    )..repeat(reverse: true);
+  double? parseLat(dynamic val) {
+    if (val == null) return null;
+    return double.tryParse(val.toString());
   }
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  void _onPanDown(_) {
-    setState(() => _isPressed = true);
-    _timer = Timer(const Duration(seconds: 3), () {
-      widget.onTrigger();
-      setState(() => _isPressed = false);
-    });
-  }
-
-  void _onPanCancel() {
-    setState(() => _isPressed = false);
-    _timer?.cancel();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onPanDown: _onPanDown,
-      onPanCancel: _onPanCancel,
-      onPanEnd: (_) => _onPanCancel(),
-      child: AnimatedBuilder(
-        animation: _controller,
-        builder: (context, child) {
-          final scale = _isPressed ? 1.1 : 1.0 + (_controller.value * 0.1);
-          return Transform.scale(
-            scale: scale,
-            child: Container(
-              width: 65,
-              height: 65,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.criticalRed,
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.criticalRed.withValues(
-                      alpha: 0.5 * _controller.value,
-                    ),
-                    blurRadius: 15 * _controller.value,
-                    spreadRadius: 10 * _controller.value,
-                  ),
-                ],
-              ),
-              child: const Icon(Icons.sos, color: Colors.white, size: 32),
-            ),
-          );
-        },
-      ),
-    );
+  double? parseLng(dynamic val) {
+    if (val == null) return null;
+    return double.tryParse(val.toString());
   }
 }

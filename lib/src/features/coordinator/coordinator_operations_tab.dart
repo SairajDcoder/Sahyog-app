@@ -417,8 +417,6 @@ class _CoordinatorOperationsTabState extends State<CoordinatorOperationsTab>
   // ── Build ──────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-
     return Column(
       children: [
         TabBar(
@@ -441,17 +439,20 @@ class _CoordinatorOperationsTabState extends State<CoordinatorOperationsTab>
               style: const TextStyle(color: AppColors.criticalRed),
             ),
           ),
-        Expanded(
-          child: TabBarView(
-            controller: _tabController,
-            children: [
-              _buildVolunteersTab(),
-              _buildTasksTab(),
-              _buildNeedsTab(),
-              _buildHistoryTab(),
-            ],
+        if (_loading && _volunteers.isEmpty && _tasks.isEmpty)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildVolunteersTab(),
+                _buildTasksTab(),
+                _buildNeedsTab(),
+                _buildHistoryTab(),
+              ],
+            ),
           ),
-        ),
       ],
     );
   }

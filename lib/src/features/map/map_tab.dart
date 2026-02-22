@@ -199,9 +199,6 @@ class _MapTabState extends State<MapTab> with AutomaticKeepAliveClientMixin {
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
 
     return Scaffold(
       body: SafeArea(
@@ -285,91 +282,138 @@ class _MapTabState extends State<MapTab> with AutomaticKeepAliveClientMixin {
                             ),
                           ],
                         ),
-                      CircleLayer(
-                        circles: _zones
-                            .map(
-                              (z) => CircleMarker(
-                                point: z.center,
-                                radius: max(40, z.radiusMeters / 5),
-                                useRadiusInMeter: true,
-                                color: _severityColor(
-                                  z.severity,
-                                ).withValues(alpha: 0.16),
-                                borderColor: _severityColor(z.severity),
-                                borderStrokeWidth: 2,
-                              ),
-                            )
-                            .toList(),
-                      ),
-                      CircleLayer(
-                        circles: _userMarkedZones
-                            .map(
-                              (z) => CircleMarker(
-                                point: z.center,
-                                radius: z.radiusMeters,
-                                useRadiusInMeter: true,
-                                color: AppColors.primaryGreen.withValues(
-                                  alpha: 0.16,
+                      if (!_loading) ...[
+                        CircleLayer(
+                          circles: _zones
+                              .map(
+                                (z) => CircleMarker(
+                                  point: z.center,
+                                  radius: max(40, z.radiusMeters / 5),
+                                  useRadiusInMeter: true,
+                                  color: _severityColor(
+                                    z.severity,
+                                  ).withValues(alpha: 0.16),
+                                  borderColor: _severityColor(z.severity),
+                                  borderStrokeWidth: 2,
                                 ),
-                                borderColor: AppColors.primaryGreen,
-                                borderStrokeWidth: 2,
-                              ),
-                            )
-                            .toList(),
-                      ),
-                      MarkerLayer(
-                        markers: _resources.map((r) {
-                          final isSos = r.type == 'SOS';
-                          return Marker(
-                            point: r.point,
-                            width: 120,
-                            height: 60,
-                            child: isSos
-                                ? _SosMarker()
-                                : Column(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 4,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white,
-                                          borderRadius: BorderRadius.circular(
-                                            10,
-                                          ),
-                                          boxShadow: const [
-                                            BoxShadow(
-                                              blurRadius: 6,
-                                              color: Color(0x22000000),
-                                            ),
-                                          ],
-                                        ),
-                                        child: Text(
-                                          r.type,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.black,
-                                          ),
-                                        ),
-                                      ),
-                                      const Icon(
-                                        Icons.location_on,
-                                        color: AppColors.primaryGreen,
-                                        size: 26,
-                                      ),
-                                    ],
+                              )
+                              .toList(),
+                        ),
+                        CircleLayer(
+                          circles: _userMarkedZones
+                              .map(
+                                (z) => CircleMarker(
+                                  point: z.center,
+                                  radius: z.radiusMeters,
+                                  useRadiusInMeter: true,
+                                  color: AppColors.primaryGreen.withValues(
+                                    alpha: 0.16,
                                   ),
-                          );
-                        }).toList(),
-                      ),
+                                  borderColor: AppColors.primaryGreen,
+                                  borderStrokeWidth: 2,
+                                ),
+                              )
+                              .toList(),
+                        ),
+                        MarkerLayer(
+                          markers: _resources.map((r) {
+                            final isSos = r.type == 'SOS';
+                            return Marker(
+                              point: r.point,
+                              width: 120,
+                              height: 60,
+                              child: isSos
+                                  ? _SosMarker()
+                                  : Column(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                            boxShadow: const [
+                                              BoxShadow(
+                                                blurRadius: 6,
+                                                color: Color(0x22000000),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Text(
+                                            r.type,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.black,
+                                            ),
+                                          ),
+                                        ),
+                                        const Icon(
+                                          Icons.location_on,
+                                          color: AppColors.primaryGreen,
+                                          size: 26,
+                                        ),
+                                      ],
+                                    ),
+                            );
+                          }).toList(),
+                        ),
+                      ],
                     ],
                   ),
+                  // Loading overlay for markers
+                  if (_loading)
+                    Positioned(
+                      top: 16,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: const [
+                              BoxShadow(
+                                blurRadius: 8,
+                                color: Color(0x22000000),
+                              ),
+                            ],
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                'Loading markers…',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   Positioned(
                     right: 16,
-                    bottom: 60, // moved up to avoid overlapping with FAB
+                    bottom: 60,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [

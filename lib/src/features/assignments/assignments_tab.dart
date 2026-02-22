@@ -121,12 +121,27 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
     }
   }
 
+  Future<void> _updateTaskStatus(String id, String status) async {
+    try {
+      await widget.api.patch(
+        '/api/v1/tasks/$id/status',
+        body: {'status': status},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Task updated to $status')));
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
     if (!widget.user.isVolunteer && !widget.user.isCoordinator) {
       return const Center(
         child: Padding(
@@ -157,30 +172,33 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
                   style: const TextStyle(color: AppColors.criticalRed),
                 ),
               ),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  RefreshIndicator(
-                    onRefresh: _load,
-                    child: ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: [
-                        _buildVolunteerAssignments(),
-                        const SizedBox(height: 12),
-                        _buildPendingTasks(),
-                      ],
+            if (_loading && _assignments.isEmpty && _pendingTasks.isEmpty)
+              const Expanded(child: Center(child: CircularProgressIndicator()))
+            else
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    RefreshIndicator(
+                      onRefresh: _load,
+                      child: ListView(
+                        padding: const EdgeInsets.all(16),
+                        children: [
+                          _buildVolunteerAssignments(),
+                          const SizedBox(height: 12),
+                          _buildPendingTasks(),
+                        ],
+                      ),
                     ),
-                  ),
-                  RefreshIndicator(
-                    onRefresh: _load,
-                    child: ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: [_buildTaskHistory()],
+                    RefreshIndicator(
+                      onRefresh: _load,
+                      child: ListView(
+                        padding: const EdgeInsets.all(16),
+                        children: [_buildTaskHistory()],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       );
@@ -218,10 +236,23 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
         ),
         const SizedBox(height: 8),
         if (_assignments.isEmpty)
-          const Card(
+          Card(
             child: Padding(
-              padding: EdgeInsets.all(14),
-              child: Text('No disaster assignments.'),
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.check_circle_outline,
+                    size: 16,
+                    color: Colors.grey[400],
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'No disaster assignments',
+                    style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                  ),
+                ],
+              ),
             ),
           )
         else
@@ -289,10 +320,23 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
         ),
         const SizedBox(height: 8),
         if (_pendingTasks.isEmpty)
-          const Card(
+          Card(
             child: Padding(
-              padding: EdgeInsets.all(14),
-              child: Text('No pending tasks.'),
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.assignment_outlined,
+                    size: 16,
+                    color: Colors.grey[400],
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'No active tasks right now',
+                    style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                  ),
+                ],
+              ),
             ),
           )
         else
@@ -303,45 +347,143 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
 
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
-              child: ListTile(
-                onTap: () async {
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => TaskDetailScreen(
-                        api: widget.api,
-                        user: widget.user,
-                        task: task,
+              child: Column(
+                children: [
+                  ListTile(
+                    onTap: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => TaskDetailScreen(
+                            api: widget.api,
+                            user: widget.user,
+                            task: task,
+                          ),
+                        ),
+                      );
+                      _load(silent: true);
+                    },
+                    leading: CircleAvatar(
+                      backgroundColor: isUnassigned
+                          ? Colors.orange.withValues(alpha: 0.1)
+                          : AppColors.primaryGreen.withValues(alpha: 0.1),
+                      child: Icon(
+                        isUnassigned ? Icons.assignment : Icons.assignment_ind,
+                        color: isUnassigned
+                            ? Colors.orange
+                            : AppColors.primaryGreen,
                       ),
                     ),
-                  );
-                  _load(silent: true);
-                },
-                leading: CircleAvatar(
-                  backgroundColor: isUnassigned
-                      ? Colors.orange.withValues(alpha: 0.1)
-                      : AppColors.primaryGreen.withValues(alpha: 0.1),
-                  child: Icon(
-                    isUnassigned ? Icons.assignment : Icons.assignment_ind,
-                    color: isUnassigned
-                        ? Colors.orange
-                        : AppColors.primaryGreen,
+                    title: Text(
+                      (task['title'] ?? task['type'] ?? 'Task').toString(),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text(
+                      isUnassigned
+                          ? 'Unassigned • Click to Accept'
+                          : 'Status: $status',
+                      style: TextStyle(
+                        color: isUnassigned ? Colors.orange[800] : null,
+                        fontWeight: isUnassigned ? FontWeight.bold : null,
+                      ),
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
                   ),
-                ),
-                title: Text(
-                  (task['title'] ?? task['type'] ?? 'Task').toString(),
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                subtitle: Text(
-                  isUnassigned
-                      ? 'Unassigned • Click to Accept'
-                      : 'Status: $status',
-                  style: TextStyle(
-                    color: isUnassigned ? Colors.orange[800] : null,
-                    fontWeight: isUnassigned ? FontWeight.bold : null,
-                  ),
-                ),
-                trailing: const Icon(Icons.chevron_right),
+                  if (isUnassigned ||
+                      status == 'pending' ||
+                      status == 'accepted' ||
+                      status == 'in_progress')
+                    Padding(
+                      padding: const EdgeInsets.only(
+                        left: 72,
+                        bottom: 12,
+                        right: 16,
+                      ),
+                      child: Row(
+                        children: [
+                          if (isUnassigned || status == 'pending')
+                            FilledButton.tonal(
+                              onPressed: () => _updateTaskStatus(
+                                (task['id'] ?? '').toString(),
+                                'accepted',
+                              ),
+                              style: FilledButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                ),
+                                minimumSize: const Size(0, 36),
+                              ),
+                              child: const Text(
+                                'Accept Task',
+                                style: TextStyle(fontSize: 13),
+                              ),
+                            ),
+                          if (!isUnassigned && status == 'pending')
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8.0),
+                              child: OutlinedButton(
+                                onPressed: () => _updateTaskStatus(
+                                  (task['id'] ?? '').toString(),
+                                  'rejected',
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  minimumSize: const Size(0, 36),
+                                  foregroundColor: AppColors.criticalRed,
+                                ),
+                                child: const Text(
+                                  'Reject',
+                                  style: TextStyle(fontSize: 13),
+                                ),
+                              ),
+                            ),
+                          if (!isUnassigned && status == 'accepted')
+                            FilledButton.tonal(
+                              onPressed: () => _updateTaskStatus(
+                                (task['id'] ?? '').toString(),
+                                'in_progress',
+                              ),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: AppColors.infoBlue.withOpacity(
+                                  0.1,
+                                ),
+                                foregroundColor: AppColors.infoBlue,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                ),
+                                minimumSize: const Size(0, 36),
+                              ),
+                              child: const Text(
+                                'Start Work',
+                                style: TextStyle(fontSize: 13),
+                              ),
+                            ),
+                          if (!isUnassigned && status == 'in_progress')
+                            FilledButton.tonal(
+                              onPressed: () => _updateTaskStatus(
+                                (task['id'] ?? '').toString(),
+                                'completed',
+                              ),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: AppColors.primaryGreen
+                                    .withOpacity(0.1),
+                                foregroundColor: AppColors.primaryGreen,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                ),
+                                minimumSize: const Size(0, 36),
+                              ),
+                              child: const Text(
+                                'Mark Done',
+                                style: TextStyle(fontSize: 13),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                ],
               ),
             );
           }),
@@ -361,10 +503,19 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
         ),
         const SizedBox(height: 8),
         if (_taskHistory.isEmpty)
-          const Card(
+          Card(
             child: Padding(
-              padding: EdgeInsets.all(14),
-              child: Text('No completed history yet.'),
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Icon(Icons.history, size: 16, color: Colors.grey[400]),
+                  const SizedBox(width: 8),
+                  Text(
+                    'No completed tasks yet',
+                    style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                  ),
+                ],
+              ),
             ),
           )
         else
@@ -392,7 +543,7 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
       return const Card(
         child: Padding(
           padding: EdgeInsets.all(16),
-          child: Text('No records found.'),
+          child: Text('No active assignments found.'),
         ),
       );
     }
