@@ -42,6 +42,10 @@ class BleScannerService {
   /// Value is the decoded BleBeacon
   final ValueNotifier<BleBeacon?> beaconDetectedNotifier = ValueNotifier(null);
 
+  /// Raw SOS beacon notifier — fires for EVERY SOS beacon detected,
+  /// bypassing deduplication. Used by the manual scan screen.
+  final ValueNotifier<BleBeacon?> rawSosBeaconNotifier = ValueNotifier(null);
+
   /// Notifies listeners with distance estimation updates
   /// Value is a map of {uuidHash: distanceLabel}
   final ValueNotifier<Map<int, String>> distanceNotifier = ValueNotifier({});
@@ -135,24 +139,24 @@ class BleScannerService {
 
   /// Process a single scan result.
   void _processResult(ScanResult result) {
-    // Extract manufacturer data for Sahyog ID
+    // Extract manufacturer data — try all keys to find Sahyog beacon
     final mfgDataMap = result.advertisementData.manufacturerData;
     if (mfgDataMap.isEmpty) return;
 
-    // Check if manufacturer ID matches Sahyog (0x5348)
-    final dynamic rawData = mfgDataMap[kSahyogManufacturerId];
-    if (rawData == null) return;
-
-    // Decode payload
-    final Uint8List sahyogData = Uint8List.fromList(List<int>.from(rawData));
-    final beacon = BlePayloadCodec.decode(sahyogData);
-    if (beacon == null) {
-      SosLog.warn(
-        'BLE_SCANNER',
-        'Invalid payload from ${result.device.remoteId}',
-      );
-      return;
+    // Try kSahyogManufacturerId directly first, then brute-force all keys
+    Uint8List? sahyogData;
+    for (final entry in mfgDataMap.entries) {
+      final candidate = Uint8List.fromList(List<int>.from(entry.value));
+      final decoded = BlePayloadCodec.decode(candidate);
+      if (decoded != null) {
+        sahyogData = candidate;
+        break;
+      }
     }
+    if (sahyogData == null) return;
+
+    final beacon = BlePayloadCodec.decode(sahyogData);
+    if (beacon == null) return;
 
     // RSSI-based distance estimation
     final distanceLabel = _estimateDistance(result.rssi);
@@ -169,7 +173,12 @@ class BleScannerService {
     distances[beacon.uuidHash] = distanceLabel;
     distanceNotifier.value = distances;
 
-    // Route by flag type
+    // Always fire rawSosBeaconNotifier — no dedup, for manual scan screen
+    if (beacon.isSos) {
+      rawSosBeaconNotifier.value = beacon;
+    }
+
+    // Route by flag type (with dedup for automated relay)
     if (beacon.isSos) {
       _handleSosBeacon(beacon, result.rssi);
     } else if (beacon.isCancel) {
@@ -334,6 +343,7 @@ class BleScannerService {
   void dispose() {
     stopScanning();
     beaconDetectedNotifier.dispose();
+    rawSosBeaconNotifier.dispose();
     distanceNotifier.dispose();
   }
 }

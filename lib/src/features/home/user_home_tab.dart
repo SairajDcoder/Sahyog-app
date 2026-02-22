@@ -14,6 +14,7 @@ import '../../core/sos_state_machine.dart';
 import '../../core/sos_sync_engine.dart';
 import '../../core/ble_advertiser_service.dart';
 import '../../theme/app_colors.dart';
+import 'ble_scan_screen.dart';
 
 class UserHomeTab extends StatefulWidget {
   const UserHomeTab({super.key, required this.api, required this.user});
@@ -421,6 +422,76 @@ class _UserHomeTabState extends State<UserHomeTab>
   }
 
   // ─────────────────────────────────────────────────────────
+  // Offline SOS — BLE Broadcast Only (no internet needed)
+  // ─────────────────────────────────────────────────────────
+
+  Future<void> _triggerOfflineSOS() async {
+    final db = DatabaseHelper.instance;
+
+    final existing = await db.getActiveIncident(widget.user.id);
+    if (existing != null) {
+      setState(() {
+        _activeLocalUuid = existing.uuid;
+        _sosFired = true;
+      });
+      return;
+    }
+
+    Position? pos = _position;
+    if (pos == null) {
+      try {
+        pos = await _locationService.getCurrentPosition().timeout(
+          const Duration(seconds: 8),
+        );
+      } catch (_) {}
+    }
+
+    final incident = SosIncident(
+      reporterId: widget.user.id,
+      lat: pos?.latitude,
+      lng: pos?.longitude,
+      type: 'Emergency',
+      status: SosStatus.activeOffline,
+    );
+
+    SosLog.event(incident.uuid, 'OFFLINE_BLE_ACTIVATE', 'mode=ble_only');
+
+    await db.insertSosIncident(incident);
+    await db.atomicUpdateIncident(
+      incident.uuid,
+      status: SosStatus.activeOffline,
+    );
+
+    setState(() {
+      _activeLocalUuid = incident.uuid;
+      _sosFired = true;
+    });
+
+    // Start BLE advertising only — no sync attempt
+    await BleAdvertiserService.instance.startAdvertising(incident);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.bluetooth, color: Colors.white),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Offline SOS active! Broadcasting via Bluetooth...\nAsk a nearby Sahyog user to relay your SOS.',
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.deepOrange,
+          duration: Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
   // Build Methods
   // ─────────────────────────────────────────────────────────
 
@@ -448,7 +519,65 @@ class _UserHomeTabState extends State<UserHomeTab>
               ),
               const SizedBox(height: 16),
               _buildEmergencySOSButton(),
-              const SizedBox(height: 24),
+              const SizedBox(height: 12),
+              // ── Relay: Find Offline SOS Nearby ──
+              InkWell(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => BleScanScreen(api: widget.api),
+                  ),
+                ),
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 14,
+                    horizontal: 16,
+                  ),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.blueGrey.shade200),
+                    color: Colors.blueGrey.shade50,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.blueGrey.shade100,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.radar, color: Colors.blueGrey),
+                      ),
+                      const SizedBox(width: 14),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Find Offline SOS Nearby',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                                color: Colors.blueGrey,
+                              ),
+                            ),
+                            Text(
+                              'Scan for people broadcasting SOS without internet',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right, color: Colors.grey),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
               Row(
                 children: [
                   const Icon(
@@ -484,8 +613,11 @@ class _UserHomeTabState extends State<UserHomeTab>
   Widget _buildEmergencySOSButton() {
     final double progress = (_sosHoldTicks / 50.0).clamp(0.0, 1.0);
 
-    // If we have an active SOS, show the cancellation UI with HOLD mechanism
+    // ── Active SOS: show cancel UI ──
     if (_activeSosId != null || _sosFired) {
+      final isBleBroadcasting =
+          _activeSosId == null && BleAdvertiserService.instance.isAdvertising;
+
       return Column(
         children: [
           GestureDetector(
@@ -509,11 +641,17 @@ class _UserHomeTabState extends State<UserHomeTab>
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
               decoration: BoxDecoration(
-                color: AppColors.criticalRed,
+                color: isBleBroadcasting
+                    ? Colors.deepOrange
+                    : AppColors.criticalRed,
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: AppColors.criticalRed.withOpacity(0.4),
+                    color:
+                        (isBleBroadcasting
+                                ? Colors.deepOrange
+                                : AppColors.criticalRed)
+                            .withOpacity(0.4),
                     blurRadius: 15,
                     spreadRadius: 2,
                   ),
@@ -538,8 +676,10 @@ class _UserHomeTabState extends State<UserHomeTab>
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(
-                        Icons.emergency,
+                      Icon(
+                        isBleBroadcasting
+                            ? Icons.bluetooth_searching
+                            : Icons.emergency,
                         color: Colors.white,
                         size: 36,
                       ),
@@ -548,11 +688,15 @@ class _UserHomeTabState extends State<UserHomeTab>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            _sosHoldTicks > 0 ? 'RELEASING...' : 'SOS ACTIVE',
+                            _sosHoldTicks > 0
+                                ? 'RELEASING...'
+                                : (isBleBroadcasting
+                                      ? 'BLE BROADCAST ACTIVE'
+                                      : 'SOS ACTIVE'),
                             style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
-                              fontSize: 20,
+                              fontSize: 18,
                               letterSpacing: 2,
                             ),
                           ),
@@ -560,7 +704,9 @@ class _UserHomeTabState extends State<UserHomeTab>
                           Text(
                             _sosHoldTicks > 0
                                 ? 'Release in ${(5.0 - (_sosHoldTicks / 10)).toStringAsFixed(1)}s'
-                                : 'Hold for 5 sec to cancel the SOS',
+                                : (isBleBroadcasting
+                                      ? 'Nearby Sahyog users can relay this'
+                                      : 'Hold for 5 sec to cancel the SOS'),
                             style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 12,
@@ -575,161 +721,204 @@ class _UserHomeTabState extends State<UserHomeTab>
             ),
           ),
           // ── Live Sync Status Strip ──
-          ValueListenableBuilder<SosSyncStatus>(
-            valueListenable: SosSyncEngine.instance.syncStatusNotifier,
-            builder: (context, status, _) {
-              if (status.phase == SosSyncPhase.idle) {
-                // If SOS is active but synced, show confirmation
-                if (_activeSosId != null) {
+          if (!isBleBroadcasting)
+            ValueListenableBuilder<SosSyncStatus>(
+              valueListenable: SosSyncEngine.instance.syncStatusNotifier,
+              builder: (context, status, _) {
+                if (status.phase == SosSyncPhase.idle) {
+                  if (_activeSosId != null) {
+                    return _SyncStatusStrip(
+                      icon: Icons.check_circle,
+                      color: AppColors.primaryGreen,
+                      message: 'SOS delivered to all responders',
+                    );
+                  }
                   return _SyncStatusStrip(
-                    icon: Icons.check_circle,
-                    color: AppColors.primaryGreen,
-                    message: 'SOS delivered to all responders',
+                    icon: Icons.wifi_off,
+                    color: Colors.orange,
+                    message: 'Offline — waiting for connection...',
+                    showPulse: true,
                   );
                 }
-                // Active but not synced yet, waiting for connectivity
-                return _SyncStatusStrip(
-                  icon: Icons.wifi_off,
-                  color: Colors.orange,
-                  message: 'Offline — waiting for connection...',
-                  showPulse: true,
-                );
-              }
-
-              switch (status.phase) {
-                case SosSyncPhase.connecting:
-                  return _SyncStatusStrip(
-                    icon: Icons.sync,
-                    color: Colors.orange,
-                    message: status.message,
-                    showPulse: true,
-                  );
-                case SosSyncPhase.syncing:
-                  return _SyncStatusStrip(
-                    icon: Icons.cloud_upload,
-                    color: Colors.blue,
-                    message: status.message,
-                    showPulse: true,
-                  );
-                case SosSyncPhase.waitingRetry:
-                  return _SyncStatusStrip(
-                    icon: Icons.timer,
-                    color: Colors.orange,
-                    message: status.message,
-                    showPulse: true,
-                  );
-                case SosSyncPhase.synced:
-                  return _SyncStatusStrip(
-                    icon: Icons.check_circle,
-                    color: AppColors.primaryGreen,
-                    message: status.message,
-                  );
-                case SosSyncPhase.failed:
-                  return _SyncStatusStrip(
-                    icon: Icons.error,
-                    color: AppColors.criticalRed,
-                    message: status.message,
-                  );
-                default:
-                  return const SizedBox.shrink();
-              }
-            },
-          ),
+                switch (status.phase) {
+                  case SosSyncPhase.connecting:
+                    return _SyncStatusStrip(
+                      icon: Icons.sync,
+                      color: Colors.orange,
+                      message: status.message,
+                      showPulse: true,
+                    );
+                  case SosSyncPhase.syncing:
+                    return _SyncStatusStrip(
+                      icon: Icons.cloud_upload,
+                      color: Colors.blue,
+                      message: status.message,
+                      showPulse: true,
+                    );
+                  case SosSyncPhase.waitingRetry:
+                    return _SyncStatusStrip(
+                      icon: Icons.timer,
+                      color: Colors.orange,
+                      message: status.message,
+                      showPulse: true,
+                    );
+                  case SosSyncPhase.synced:
+                    return _SyncStatusStrip(
+                      icon: Icons.check_circle,
+                      color: AppColors.primaryGreen,
+                      message: status.message,
+                    );
+                  case SosSyncPhase.failed:
+                    return _SyncStatusStrip(
+                      icon: Icons.error,
+                      color: AppColors.criticalRed,
+                      message: status.message,
+                    );
+                  default:
+                    return const SizedBox.shrink();
+                }
+              },
+            )
+          else
+            _SyncStatusStrip(
+              icon: Icons.bluetooth,
+              color: Colors.deepOrange,
+              message:
+                  'Broadcasting via Bluetooth — ask a nearby Sahyog user to relay',
+              showPulse: true,
+            ),
         ],
       );
     }
 
-    return GestureDetector(
-      onTapDown: (_) {
-        if (_sosFired) return;
-        _sosHoldTicks = 0;
-        _sosHoldTimer = Timer.periodic(const Duration(milliseconds: 100), (
-          timer,
-        ) {
-          setState(() {
-            _sosHoldTicks++;
-            if (_sosHoldTicks >= 50) {
-              _sosHoldTimer?.cancel();
-              _sosFired = true;
-              _triggerSOS();
-            }
-          });
-        });
-      },
-      onTapUp: (_) => _cancelHold(),
-      onTapCancel: () => _cancelHold(),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.criticalRed, width: 2),
-          boxShadow: [
-            if (_sosHoldTicks > 0)
-              BoxShadow(
-                color: AppColors.criticalRed.withOpacity(0.3),
-                blurRadius: 10,
-                spreadRadius: progress * 5,
-              ),
-          ],
-        ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            if (!_sosFired && _sosHoldTicks > 0)
-              Positioned.fill(
-                child: FractionallySizedBox(
-                  alignment: Alignment.centerLeft,
-                  widthFactor: progress,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.criticalRed.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(14),
+    // ── Not yet fired: show TWO buttons ──
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Button 1: SOS with Internet
+        GestureDetector(
+          onTapDown: (_) {
+            if (_sosFired) return;
+            _sosHoldTicks = 0;
+            _sosHoldTimer = Timer.periodic(const Duration(milliseconds: 100), (
+              timer,
+            ) {
+              setState(() {
+                _sosHoldTicks++;
+                if (_sosHoldTicks >= 50) {
+                  _sosHoldTimer?.cancel();
+                  _sosFired = true;
+                  _triggerSOS();
+                }
+              });
+            });
+          },
+          onTapUp: (_) => _cancelHold(),
+          onTapCancel: () => _cancelHold(),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.criticalRed, width: 2),
+              boxShadow: [
+                if (_sosHoldTicks > 0)
+                  BoxShadow(
+                    color: AppColors.criticalRed.withOpacity(0.3),
+                    blurRadius: 10,
+                    spreadRadius: progress * 5,
+                  ),
+              ],
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                if (_sosHoldTicks > 0)
+                  Positioned.fill(
+                    child: FractionallySizedBox(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: progress,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.criticalRed.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(
-                  Icons.emergency,
-                  color: AppColors.criticalRed,
-                  size: 36,
-                ),
-                const SizedBox(width: 16),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text(
-                      'HOLD FOR SOS',
-                      style: TextStyle(
-                        color: AppColors.criticalRed,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
-                        letterSpacing: 2,
-                      ),
+                    const Icon(
+                      Icons.emergency,
+                      color: AppColors.criticalRed,
+                      size: 32,
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      (_sosHoldTicks > 0)
-                          ? 'Holding... ${(5.0 - (_sosHoldTicks / 10)).toStringAsFixed(1)}s'
-                          : 'Hold for 5 seconds to request help',
-                      style: TextStyle(
-                        color: Colors.black54,
-                        fontSize: 12,
-                        fontWeight: _sosHoldTicks > 0
-                            ? FontWeight.bold
-                            : FontWeight.normal,
-                      ),
+                    const SizedBox(width: 14),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'HOLD FOR SOS',
+                          style: TextStyle(
+                            color: AppColors.criticalRed,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                            letterSpacing: 2,
+                          ),
+                        ),
+                        Text(
+                          _sosHoldTicks > 0
+                              ? 'Holding... ${(5.0 - (_sosHoldTicks / 10)).toStringAsFixed(1)}s'
+                              : 'Hold 5s — sends via internet',
+                          style: const TextStyle(
+                            color: Colors.black54,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ],
             ),
-          ],
+          ),
         ),
-      ),
+        const SizedBox(height: 10),
+        // Button 2: Offline SOS via BLE
+        OutlinedButton.icon(
+          onPressed: () {
+            setState(() => _sosFired = true);
+            _triggerOfflineSOS();
+          },
+          icon: const Icon(Icons.bluetooth_searching, color: Colors.deepOrange),
+          label: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'OFFLINE SOS (BLE)',
+                style: TextStyle(
+                  color: Colors.deepOrange,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1,
+                ),
+              ),
+              Text(
+                'No internet? Broadcast to nearby Sahyog users',
+                style: TextStyle(color: Colors.grey, fontSize: 11),
+              ),
+            ],
+          ),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+            side: const BorderSide(color: Colors.deepOrange, width: 1.5),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            alignment: Alignment.centerLeft,
+          ),
+        ),
+      ],
     );
   }
 

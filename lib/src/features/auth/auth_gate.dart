@@ -25,7 +25,6 @@ import '../missing/missing_tab.dart';
 import '../notifications/notifications_tab.dart';
 import '../profile/profile_tab.dart';
 import 'user_profile_completion_screen.dart';
-import '../home/global_mesh_overlay.dart';
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key, required this.authState});
@@ -114,9 +113,8 @@ class _AuthGateState extends State<AuthGate> {
         user.isCoordinator || user.isAdmin,
       );
 
-      // Initialize BLE Mesh scanner for everyone (all users can relay)
+      // Initialize BLE Mesh scanner service (will be started on-demand from scan screen)
       BleScannerService.instance.initialize(_api, user.id);
-      BleScannerService.instance.startScanning();
 
       setState(() {
         _user = user;
@@ -176,9 +174,7 @@ class _AuthGateState extends State<AuthGate> {
       );
     }
 
-    return GlobalMeshOverlay(
-      child: RoleBasedAppShell(api: _api, user: _user!, onRefresh: _bootstrap),
-    );
+    return RoleBasedAppShell(api: _api, user: _user!, onRefresh: _bootstrap);
   }
 }
 
