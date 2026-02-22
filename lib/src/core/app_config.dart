@@ -4,7 +4,7 @@ class AppConfig {
   static const _envBaseUrl = String.fromEnvironment('API_BASE_URL');
 
   // Local Network Server for physical device testing
-  static const productionUrl = 'http://172.25.96.237:3000';
+  static const productionUrl = 'http://172.25.96.235:3000';
 
   // Android emulator reaches host machine via 10.0.2.2.
   static const androidBaseUrl = 'http://10.0.2.2:3000';
